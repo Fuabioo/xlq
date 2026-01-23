@@ -1,0 +1,21 @@
+# Binaries
+xlq
+*.exe
+dist/
+
+# Dependencies
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Test files
+*.xlsx
+!testdata/*.xlsx
+
+# Build artifacts
+*.test
+*.out
+coverage.txt
