@@ -49,4 +49,4 @@ run *args:
 
 # Run MCP server mode
 mcp:
-    go run ./cmd/xlq --mcp
+    go run ./cmd/xlq mcp
