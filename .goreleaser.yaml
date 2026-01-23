@@ -2,6 +2,38 @@ version: 2
 
 project_name: xlq
 
+release:
+  draft: false
+  prerelease: auto
+  mode: replace
+  make_latest: true
+  name_template: "v{{ .Version }}"
+  header: |
+    ## xlq {{ .Version }}
+
+    **jq for Excel** - Streaming xlsx CLI and MCP server.
+  footer: |
+    ## Installation
+
+    **Homebrew:**
+    ```bash
+    brew tap Fuabioo/tap
+    brew install xlq
+    ```
+
+    **Go:**
+    ```bash
+    go install github.com/Fuabioo/xlq/cmd/xlq@latest
+    ```
+
+    **Claude Code MCP:**
+    ```bash
+    claude mcp add excel -- xlq mcp
+    ```
+
+    ---
+    **Full Changelog**: https://github.com/Fuabioo/xlq/compare/{{ .PreviousTag }}...{{ .Tag }}
+
 before:
   hooks:
     - go mod tidy
@@ -27,14 +59,33 @@ builds:
       - -X main.version={{.Version}}
 
 archives:
-  - id: default
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
     files:
       - README.md
       - LICENSE*
-    formats:
-      - tar.gz
-      - zip
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+brews:
+  - repository:
+      owner: Fuabioo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/Fuabioo/xlq"
+    description: "xlq - jq for Excel. Streaming xlsx CLI and MCP server."
+    license: "MIT"
+    test: |
+      system "#{bin}/xlq --version"
+    install: |
+      bin.install "xlq"
 
 checksum:
   name_template: 'checksums.txt'
@@ -43,8 +94,29 @@ snapshot:
   version_template: "{{ .Tag }}-next"
 
 changelog:
+  use: github
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "skip ci"
+      - "skip-ci"
+      - "^docs:"
+      - "^test:"
+  groups:
+    - title: "Features"
+      regexp: "(?i).*(feat|add|implement|create|initial|new).*"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "(?i).*(fix|resolve|correct|patch|bug).*"
+      order: 1
+    - title: "Documentation"
+      regexp: "(?i).*(docs|documentation|readme).*"
+      order: 2
+    - title: "Improvements"
+      regexp: "(?i).*(improve|enhance|optimize|update|upgrade).*"
+      order: 3
+    - title: "Cleanup"
+      regexp: "(?i).*(cleanup|clean|remove|delete|refactor).*"
+      order: 4
+    - title: "Others"
+      order: 999
