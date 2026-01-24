@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -126,7 +127,7 @@ func BenchmarkStreamHeadMemory(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		ch, err := StreamHead(f, "Sheet1", 10)
+		ch, err := StreamHead(context.Background(), f, "Sheet1", 10)
 		if err != nil {
 			b.Fatalf("StreamHead failed: %v", err)
 		}

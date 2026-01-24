@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/xuri/excelize/v2"
@@ -15,7 +16,8 @@ type RowResult struct {
 // StreamRows streams rows from startRow to endRow (1-based, inclusive)
 // If endRow is 0, streams to end of sheet
 // Returns a channel that yields rows and closes when done
-func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan RowResult, error) {
+// The context can be used to cancel the streaming operation
+func StreamRows(ctx context.Context, f *excelize.File, sheet string, startRow, endRow int) (<-chan RowResult, error) {
 	resolvedSheet, err := ResolveSheetName(f, sheet)
 	if err != nil {
 		return nil, err
@@ -48,8 +50,12 @@ func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan Ro
 
 			cols, err := rows.Columns()
 			if err != nil {
-				ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}:
+					return
+				}
 			}
 
 			cells := make([]Cell, len(cols))
@@ -63,11 +69,19 @@ func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan Ro
 				}
 			}
 
-			ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}:
+			}
 		}
 
 		if err := rows.Error(); err != nil {
-			ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}:
+			}
 		}
 	}()
 
@@ -75,7 +89,8 @@ func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan Ro
 }
 
 // StreamRange streams cells within a specified range (e.g., "A1:C10")
-func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, error) {
+// The context can be used to cancel the streaming operation
+func StreamRange(ctx context.Context, f *excelize.File, sheet, rangeStr string) (<-chan RowResult, error) {
 	resolvedSheet, err := ResolveSheetName(f, sheet)
 	if err != nil {
 		return nil, err
@@ -113,8 +128,12 @@ func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, er
 
 			cols, err := rows.Columns()
 			if err != nil {
-				ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}:
+					return
+				}
 			}
 
 			// Extract only columns in range
@@ -133,11 +152,19 @@ func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, er
 				})
 			}
 
-			ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}:
+			}
 		}
 
 		if err := rows.Error(); err != nil {
-			ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}:
+			}
 		}
 	}()
 
@@ -145,11 +172,11 @@ func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, er
 }
 
 // StreamHead streams the first n rows of a sheet
-func StreamHead(f *excelize.File, sheet string, n int) (<-chan RowResult, error) {
+func StreamHead(ctx context.Context, f *excelize.File, sheet string, n int) (<-chan RowResult, error) {
 	if n <= 0 {
 		n = 10 // Default to 10 rows
 	}
-	return StreamRows(f, sheet, 1, n)
+	return StreamRows(ctx, f, sheet, 1, n)
 }
 
 // StreamTail returns the last n rows of a sheet
@@ -283,8 +310,8 @@ func RowsToStringSlice(rows []Row) [][]string {
 }
 
 // StreamRowsToStrings is a convenience function that collects and converts
-func StreamRowsToStrings(f *excelize.File, sheet string, startRow, endRow int) ([][]string, error) {
-	ch, err := StreamRows(f, sheet, startRow, endRow)
+func StreamRowsToStrings(ctx context.Context, f *excelize.File, sheet string, startRow, endRow int) ([][]string, error) {
+	ch, err := StreamRows(ctx, f, sheet, startRow, endRow)
 	if err != nil {
 		return nil, err
 	}

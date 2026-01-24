@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -44,9 +45,11 @@ var readCmd = &cobra.Command{
 			}
 		}
 
+		ctx := context.Background()
+
 		var rows []xlsx.Row
 		if rangeStr != "" {
-			ch, err := xlsx.StreamRange(f, sheet, rangeStr)
+			ch, err := xlsx.StreamRange(ctx, f, sheet, rangeStr)
 			if err != nil {
 				return err
 			}
@@ -55,7 +58,7 @@ var readCmd = &cobra.Command{
 				return err
 			}
 		} else {
-			ch, err := xlsx.StreamRows(f, sheet, 0, 0)
+			ch, err := xlsx.StreamRows(ctx, f, sheet, 0, 0)
 			if err != nil {
 				return err
 			}

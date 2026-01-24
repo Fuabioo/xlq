@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -34,7 +35,9 @@ var headCmd = &cobra.Command{
 			}
 		}
 
-		ch, err := xlsx.StreamHead(f, sheet, headN)
+		ctx := context.Background()
+
+		ch, err := xlsx.StreamHead(ctx, f, sheet, headN)
 		if err != nil {
 			return err
 		}

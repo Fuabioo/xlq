@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"runtime"
 	"testing"
 	"time"
@@ -32,8 +33,11 @@ func TestGoroutineLeakStreamRows(t *testing.T) {
 	const leakAttempts = 10
 
 	for range leakAttempts {
+		// Create a cancelable context
+		ctx, cancel := context.WithCancel(context.Background())
+
 		// Start streaming (this spawns a goroutine)
-		ch, err := StreamRows(f, "Sheet1", 1, 1000)
+		ch, err := StreamRows(ctx, f, "Sheet1", 1, 1000)
 		if err != nil {
 			t.Fatalf("StreamRows failed: %v", err)
 		}
@@ -47,9 +51,11 @@ func TestGoroutineLeakStreamRows(t *testing.T) {
 			t.Fatal("Expected row, got nil")
 		}
 
+		// Cancel the context to signal the goroutine to exit
+		// This prevents the goroutine from blocking on the channel send
+		cancel()
+
 		// Abandon the channel (don't read remaining 999 rows)
-		// The goroutine is trying to send row #2 to the unbuffered channel
-		// but nobody is receiving, so it should block forever
 		_ = ch // Don't read any more
 	}
 
@@ -94,8 +100,11 @@ func TestGoroutineLeakStreamRange(t *testing.T) {
 	const leakAttempts = 10
 
 	for range leakAttempts {
+		// Create a cancelable context
+		ctx, cancel := context.WithCancel(context.Background())
+
 		// Stream a large range
-		ch, err := StreamRange(f, "Sheet1", "A1:C1000")
+		ch, err := StreamRange(ctx, f, "Sheet1", "A1:C1000")
 		if err != nil {
 			t.Fatalf("StreamRange failed: %v", err)
 		}
@@ -108,6 +117,9 @@ func TestGoroutineLeakStreamRange(t *testing.T) {
 		if result.Row == nil {
 			t.Fatal("Expected row, got nil")
 		}
+
+		// Cancel the context to signal the goroutine to exit
+		cancel()
 
 		// Abandon the channel
 		_ = ch
@@ -152,7 +164,7 @@ func TestGoroutineNoLeakFullConsumption(t *testing.T) {
 	const iterations = 10
 
 	for range iterations {
-		ch, err := StreamRows(f, "Sheet1", 1, 100)
+		ch, err := StreamRows(context.Background(), f, "Sheet1", 1, 100)
 		if err != nil {
 			t.Fatalf("StreamRows failed: %v", err)
 		}
@@ -196,7 +208,9 @@ func TestGoroutineLeakTiming(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	baseline := runtime.NumGoroutine()
 
-	ch, err := StreamRows(f, "Sheet1", 1, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch, err := StreamRows(ctx, f, "Sheet1", 1, 10)
 	if err != nil {
 		t.Fatalf("StreamRows failed: %v", err)
 	}
@@ -214,10 +228,13 @@ func TestGoroutineLeakTiming(t *testing.T) {
 	t.Logf("After reading 1 row: %d goroutines (delta: %d)",
 		afterFirstRead, afterFirstRead-baseline)
 
-	// Abandon channel - goroutine tries to send row 2 and blocks
+	// Cancel context to prevent goroutine from blocking
+	cancel()
+
+	// Abandon channel - with context canceled, goroutine should exit
 	time.Sleep(200 * time.Millisecond)
 	afterAbandon := runtime.NumGoroutine()
-	t.Logf("After abandon: %d goroutines (delta: %d)",
+	t.Logf("After abandon + cancel: %d goroutines (delta: %d)",
 		afterAbandon, afterAbandon-baseline)
 
 	// Wait longer to see if it cleans up
@@ -229,11 +246,9 @@ func TestGoroutineLeakTiming(t *testing.T) {
 		afterWait, afterWait-baseline)
 
 	if afterWait-baseline >= 1 {
-		t.Logf("LEAK CONFIRMED: Goroutine did not exit after 1+ seconds")
-		t.Logf("The goroutine is blocked on: ch <- RowResult{Row: &Row{Number: 2, ...}}")
-		t.Logf("Root cause: Unbuffered channel with no receiver")
+		t.Errorf("LEAK DETECTED: Goroutine did not exit after 1+ seconds with canceled context")
 	} else {
-		t.Logf("No leak detected in this test")
+		t.Logf("SUCCESS: No leak detected - goroutine exited cleanly with context cancellation")
 	}
 }
 
@@ -251,7 +266,7 @@ func BenchmarkGoroutineLeakMemory(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ch, err := StreamRows(f, "Sheet1", 1, 1000)
+		ch, err := StreamRows(context.Background(), f, "Sheet1", 1, 1000)
 		if err != nil {
 			b.Fatalf("StreamRows failed: %v", err)
 		}
