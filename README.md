@@ -165,13 +165,16 @@ Memory usage stays constant regardless of file size.
 Requires [just](https://github.com/casey/just) command runner.
 
 ```bash
-just build          # Build binary
-just test           # Run tests
-just coverage       # Run tests with coverage
-just lint           # Run linter
-just dist           # Build for all platforms
-just clean          # Remove artifacts
-just help           # List all recipes
+$ just --list
+Available recipes:
+    build     # Build all platforms (cross-compile with goreleaser)
+    clean     # Remove build artifacts
+    coverage  # Run tests with coverage
+    install   # Install to GOBIN (like go install)
+    lint      # Run linter
+    mcp       # Run MCP server mode
+    run *args # Run directly (development)
+    test      # Run all tests
 ```
 
 ## License
