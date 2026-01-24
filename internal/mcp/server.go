@@ -50,37 +50,37 @@ func (s *Server) registerTools() {
 
 	// read tool - Read cells from a range
 	s.mcpServer.AddTool(mcp.NewTool("read",
-		mcp.WithDescription("Read cells from a range or entire sheet"),
+		mcp.WithDescription("Read cells from a range or entire sheet. If no range specified, reads first 1000 rows (configurable via limit)"),
 		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
 		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
-		mcp.WithString("range", mcp.Description("Cell range (e.g., A1:C10). If not specified, reads entire sheet")),
+		mcp.WithString("range", mcp.Description("Cell range (e.g., A1:C10). If not specified, reads entire sheet with limit")),
 	), s.handleRead)
 
 	// head tool - Get first N rows
 	s.mcpServer.AddTool(mcp.NewTool("head",
-		mcp.WithDescription("Get first N rows of a sheet"),
+		mcp.WithDescription("Get first N rows of a sheet (max 5000 rows)"),
 		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
 		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
-		mcp.WithNumber("n", mcp.Description("Number of rows (default: 10)")),
+		mcp.WithNumber("n", mcp.Description("Number of rows (default: 10, max: 5000)")),
 	), s.handleHead)
 
 	// tail tool - Get last N rows
 	s.mcpServer.AddTool(mcp.NewTool("tail",
-		mcp.WithDescription("Get last N rows of a sheet"),
+		mcp.WithDescription("Get last N rows of a sheet (max 5000 rows)"),
 		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
 		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
-		mcp.WithNumber("n", mcp.Description("Number of rows (default: 10)")),
+		mcp.WithNumber("n", mcp.Description("Number of rows (default: 10, max: 5000)")),
 	), s.handleTail)
 
 	// search tool - Search for cells matching a pattern
 	s.mcpServer.AddTool(mcp.NewTool("search",
-		mcp.WithDescription("Search for cells matching a pattern across sheets"),
+		mcp.WithDescription("Search for cells matching a pattern across sheets (max 1000 results)"),
 		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Search pattern (string or regex)")),
 		mcp.WithString("sheet", mcp.Description("Sheet to search (default: all sheets)")),
 		mcp.WithBoolean("ignoreCase", mcp.Description("Case-insensitive search (default: false)")),
 		mcp.WithBoolean("regex", mcp.Description("Treat pattern as regex (default: false)")),
-		mcp.WithNumber("maxResults", mcp.Description("Maximum results to return (0 = unlimited, default: 100)")),
+		mcp.WithNumber("maxResults", mcp.Description("Maximum results to return (default: 100, max: 1000)")),
 	), s.handleSearch)
 
 	// cell tool - Get single cell value
@@ -153,8 +153,10 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 	}
 
 	var rows []xlsx.Row
+	var truncated bool
+
 	if rangeStr != "" {
-		// Read specific range
+		// Read specific range - no limit needed
 		ch, err := xlsx.StreamRange(f, resolvedSheet, rangeStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -163,25 +165,41 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		truncated = false
 	} else {
-		// Read entire sheet
+		// Read entire sheet with default limit
 		ch, err := xlsx.StreamRows(f, resolvedSheet, 0, 0)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		rows, err = xlsx.CollectRows(ch)
+		var totalScanned int
+		rows, totalScanned, truncated, err = xlsx.CollectRowsWithLimit(ch, DefaultRowLimit)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		_ = totalScanned // Used by CollectRowsWithLimit for metadata
 	}
 
-	return jsonResult(xlsx.RowsToStringSlice(rows))
+	return jsonResultWithMetadata(
+		xlsx.RowsToStringSlice(rows),
+		len(rows),
+		truncated,
+		DefaultRowLimit,
+	)
 }
 
 func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	file := request.GetString("file", "")
 	sheet := request.GetString("sheet", "")
-	n := request.GetInt("n", 10)
+	n := request.GetInt("n", DefaultHeadRows)
+
+	// Cap n at MaxHeadRows
+	if n > MaxHeadRows {
+		n = MaxHeadRows
+	}
+	if n <= 0 {
+		n = DefaultHeadRows
+	}
 
 	f, err := xlsx.OpenFile(file)
 	if err != nil {
@@ -205,13 +223,26 @@ func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(xlsx.RowsToStringSlice(rows))
+	return jsonResultWithMetadata(
+		xlsx.RowsToStringSlice(rows),
+		len(rows),
+		false, // head never truncates - it's a hard limit
+		n,
+	)
 }
 
 func (s *Server) handleTail(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	file := request.GetString("file", "")
 	sheet := request.GetString("sheet", "")
-	n := request.GetInt("n", 10)
+	n := request.GetInt("n", DefaultTailRows)
+
+	// Cap n at MaxTailRows
+	if n > MaxTailRows {
+		n = MaxTailRows
+	}
+	if n <= 0 {
+		n = DefaultTailRows
+	}
 
 	f, err := xlsx.OpenFile(file)
 	if err != nil {
@@ -230,7 +261,12 @@ func (s *Server) handleTail(ctx context.Context, request mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(xlsx.RowsToStringSlice(rows))
+	return jsonResultWithMetadata(
+		xlsx.RowsToStringSlice(rows),
+		len(rows),
+		false, // tail never truncates - it's a hard limit
+		n,
+	)
 }
 
 func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -239,7 +275,15 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 	sheet := request.GetString("sheet", "")
 	ignoreCase := request.GetBool("ignoreCase", false)
 	regex := request.GetBool("regex", false)
-	maxResults := request.GetInt("maxResults", 100)
+	maxResults := request.GetInt("maxResults", DefaultSearchResults)
+
+	// Cap maxResults at MaxSearchResults and ensure it's at least 1
+	if maxResults <= 0 {
+		maxResults = DefaultSearchResults
+	}
+	if maxResults > MaxSearchResults {
+		maxResults = MaxSearchResults
+	}
 
 	f, err := xlsx.OpenFile(file)
 	if err != nil {
@@ -273,11 +317,17 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(map[string]any{
-		"pattern": pattern,
-		"total":   len(results),
-		"results": results,
-	})
+	truncated := len(results) >= maxResults
+
+	return jsonResultWithMetadata(
+		map[string]any{
+			"pattern": pattern,
+			"results": results,
+		},
+		len(results),
+		truncated,
+		maxResults,
+	)
 }
 
 func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -312,5 +362,34 @@ func jsonResult(v interface{}) (*mcp.CallToolResult, error) {
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("JSON encoding error: %v", err)), nil
 	}
+
+	// Check output size limit
+	if len(data) > MaxOutputBytes {
+		return mcp.NewToolResultError(fmt.Sprintf("Output too large (%d bytes, max %d bytes). Try reducing the range or limit.", len(data), MaxOutputBytes)), nil
+	}
+
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+func jsonResultWithMetadata(data interface{}, rowsReturned int, truncated bool, limit int) (*mcp.CallToolResult, error) {
+	result := map[string]interface{}{
+		"data": data,
+		"metadata": map[string]interface{}{
+			"rows_returned": rowsReturned,
+			"truncated":     truncated,
+			"limit":         limit,
+		},
+	}
+
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("JSON encoding error: %v", err)), nil
+	}
+
+	// Check output size limit
+	if len(jsonData) > MaxOutputBytes {
+		return mcp.NewToolResultError(fmt.Sprintf("Output too large (%d bytes, max %d bytes). Try reducing the range or limit.", len(jsonData), MaxOutputBytes)), nil
+	}
+
+	return mcp.NewToolResultText(string(jsonData)), nil
 }

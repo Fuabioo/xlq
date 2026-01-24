@@ -433,6 +433,92 @@ func TestCollectRowsWithError(t *testing.T) {
 	}
 }
 
+func TestCollectRowsWithLimit(t *testing.T) {
+	// Test with limit smaller than total rows
+	ch := make(chan RowResult)
+
+	go func() {
+		for i := 1; i <= 100; i++ {
+			ch <- RowResult{Row: &Row{Number: i, Cells: []Cell{{Value: fmt.Sprintf("row%d", i)}}}}
+		}
+		close(ch)
+	}()
+
+	rows, total, truncated, err := CollectRowsWithLimit(ch, 10)
+	if err != nil {
+		t.Fatalf("CollectRowsWithLimit failed: %v", err)
+	}
+
+	if len(rows) != 10 {
+		t.Errorf("expected 10 rows, got %d", len(rows))
+	}
+
+	if total != 100 {
+		t.Errorf("expected total 100, got %d", total)
+	}
+
+	if !truncated {
+		t.Error("expected truncated to be true")
+	}
+
+	// Verify first and last collected rows
+	if rows[0].Number != 1 {
+		t.Errorf("expected first row number 1, got %d", rows[0].Number)
+	}
+	if rows[9].Number != 10 {
+		t.Errorf("expected last row number 10, got %d", rows[9].Number)
+	}
+}
+
+func TestCollectRowsWithLimitNoTruncation(t *testing.T) {
+	// Test with limit larger than total rows
+	ch := make(chan RowResult)
+
+	go func() {
+		for i := 1; i <= 5; i++ {
+			ch <- RowResult{Row: &Row{Number: i, Cells: []Cell{{Value: fmt.Sprintf("row%d", i)}}}}
+		}
+		close(ch)
+	}()
+
+	rows, total, truncated, err := CollectRowsWithLimit(ch, 10)
+	if err != nil {
+		t.Fatalf("CollectRowsWithLimit failed: %v", err)
+	}
+
+	if len(rows) != 5 {
+		t.Errorf("expected 5 rows, got %d", len(rows))
+	}
+
+	if total != 5 {
+		t.Errorf("expected total 5, got %d", total)
+	}
+
+	if truncated {
+		t.Error("expected truncated to be false")
+	}
+}
+
+func TestCollectRowsWithLimitError(t *testing.T) {
+	// Test error handling with limits
+	ch := make(chan RowResult)
+
+	go func() {
+		ch <- RowResult{Row: &Row{Number: 1, Cells: []Cell{{Value: "a"}}}}
+		ch <- RowResult{Err: fmt.Errorf("test error")}
+		close(ch)
+	}()
+
+	_, total, _, err := CollectRowsWithLimit(ch, 10)
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+
+	if total != 1 {
+		t.Errorf("expected total 1 before error, got %d", total)
+	}
+}
+
 func TestStreamRowsDefaultSheet(t *testing.T) {
 	path := createLargeTestFile(t, 10)
 

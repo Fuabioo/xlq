@@ -244,6 +244,32 @@ func CollectRows(ch <-chan RowResult) ([]Row, error) {
 	return rows, nil
 }
 
+// CollectRowsWithLimit collects up to limit rows from a channel
+// Returns: (rows, totalScanned, truncated, error)
+// - rows: collected rows (up to limit)
+// - totalScanned: total number of rows seen
+// - truncated: true if more rows were available than limit
+// - error: any error encountered during collection
+func CollectRowsWithLimit(ch <-chan RowResult, limit int) ([]Row, int, bool, error) {
+	var rows []Row
+	total := 0
+
+	for result := range ch {
+		if result.Err != nil {
+			return nil, total, false, result.Err
+		}
+		if result.Row != nil {
+			total++
+			if len(rows) < limit {
+				rows = append(rows, *result.Row)
+			}
+		}
+	}
+
+	truncated := total > limit
+	return rows, total, truncated, nil
+}
+
 // RowsToStringSlice converts rows to [][]string for output formatting
 func RowsToStringSlice(rows []Row) [][]string {
 	result := make([][]string, len(rows))
