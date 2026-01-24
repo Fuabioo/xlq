@@ -28,7 +28,10 @@ release:
 
     **Claude Code MCP:**
     ```bash
-    claude mcp add excel -- xlq mcp
+    claude mcp add --scope user --transport stdio excel xlq mcp
+    ```
+    ```bash
+    claude mcp remove excel
     ```
 
     ---
@@ -88,7 +91,7 @@ brews:
       bin.install "xlq"
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 snapshot:
   version_template: "{{ .Tag }}-next"
