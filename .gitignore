@@ -19,3 +19,6 @@ vendor/
 *.test
 *.out
 coverage.txt
+
+# Claude local settings
+.claude/settings.local.json
