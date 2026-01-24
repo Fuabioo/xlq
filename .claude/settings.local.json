@@ -41,7 +41,10 @@
       "Bash(mktemp:*)",
       "Bash(go version:*)",
       "Bash(tee:*)",
-      "Bash(go clean:*)"
+      "Bash(go clean:*)",
+      "Bash(test:*)",
+      "Bash(goimports:*)",
+      "Bash(/tmp/xlq:*)"
     ]
   }
 }
