@@ -9,15 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	tailN int
-)
-
 var tailCmd = &cobra.Command{
 	Use:   "tail <file.xlsx> [sheet]",
 	Short: "Show last N rows",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		n, _ := cmd.Flags().GetInt("number")
+
 		f, err := xlsx.OpenFile(args[0])
 		if err != nil {
 			return err
@@ -35,13 +33,13 @@ var tailCmd = &cobra.Command{
 			}
 		}
 
-		rows, err := xlsx.StreamTail(f, sheet, tailN)
+		rows, err := xlsx.StreamTail(f, sheet, n)
 		if err != nil {
 			return err
 		}
 
 		data := xlsx.RowsToStringSlice(rows)
-		out, err := output.FormatRows(GetFormat(), data)
+		out, err := output.FormatRows(GetFormatFromCmd(cmd), data)
 		if err != nil {
 			return err
 		}
@@ -52,6 +50,6 @@ var tailCmd = &cobra.Command{
 }
 
 func init() {
-	tailCmd.Flags().IntVarP(&tailN, "number", "n", 10, "Number of rows to show")
+	tailCmd.Flags().IntP("number", "n", 10, "Number of rows to show")
 	rootCmd.AddCommand(tailCmd)
 }

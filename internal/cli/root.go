@@ -8,10 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	formatFlag string
-)
-
 // rootCmd is the base command
 var rootCmd = &cobra.Command{
 	Use:   "xlq",
@@ -43,10 +39,14 @@ func Execute(ctx context.Context, version, commit, date string) error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&formatFlag, "format", "f", "json", "Output format (json, csv, tsv)")
+	rootCmd.PersistentFlags().StringP("format", "f", "json", "Output format (json, csv, tsv)")
 }
 
-// GetFormat returns the current format flag value
-func GetFormat() string {
-	return formatFlag
+// GetFormatFromCmd returns the format flag value from the command
+func GetFormatFromCmd(cmd *cobra.Command) string {
+	format, _ := cmd.Flags().GetString("format")
+	if format == "" {
+		format = "json"
+	}
+	return format
 }

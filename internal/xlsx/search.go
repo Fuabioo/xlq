@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -23,7 +24,7 @@ type SearchResultStream struct {
 }
 
 // Search searches for cells matching a pattern across one or all sheets
-func Search(f *excelize.File, pattern string, opts SearchOptions) (<-chan SearchResultStream, error) {
+func Search(ctx context.Context, f *excelize.File, pattern string, opts SearchOptions) (<-chan SearchResultStream, error) {
 	if f == nil {
 		return nil, fmt.Errorf("file handle is nil")
 	}
@@ -82,19 +83,35 @@ func Search(f *excelize.File, pattern string, opts SearchOptions) (<-chan Search
 		for _, sheet := range sheetsToSearch {
 			rows, err := f.Rows(sheet)
 			if err != nil {
-				ch <- SearchResultStream{Err: fmt.Errorf("failed to read sheet %s: %w", sheet, err)}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- SearchResultStream{Err: fmt.Errorf("failed to read sheet %s: %w", sheet, err)}:
+					return
+				}
 			}
 
 			rowNum := 0
 			for rows.Next() {
+				// Check context before processing row
+				select {
+				case <-ctx.Done():
+					rows.Close()
+					return
+				default:
+				}
+
 				rowNum++
 
 				cols, err := rows.Columns()
 				if err != nil {
 					rows.Close()
-					ch <- SearchResultStream{Err: fmt.Errorf("error at row %d: %w", rowNum, err)}
-					return
+					select {
+					case <-ctx.Done():
+						return
+					case ch <- SearchResultStream{Err: fmt.Errorf("error at row %d: %w", rowNum, err)}:
+						return
+					}
 				}
 
 				for colIdx, val := range cols {
@@ -106,7 +123,12 @@ func Search(f *excelize.File, pattern string, opts SearchOptions) (<-chan Search
 							Row:     rowNum,
 							Col:     colIdx + 1,
 						}
-						ch <- SearchResultStream{Result: result}
+						select {
+						case <-ctx.Done():
+							rows.Close()
+							return
+						case ch <- SearchResultStream{Result: result}:
+						}
 
 						resultCount++
 						if opts.MaxResults > 0 && resultCount >= opts.MaxResults {
@@ -119,8 +141,12 @@ func Search(f *excelize.File, pattern string, opts SearchOptions) (<-chan Search
 
 			if err := rows.Error(); err != nil {
 				rows.Close()
-				ch <- SearchResultStream{Err: fmt.Errorf("row iteration error in sheet %s: %w", sheet, err)}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- SearchResultStream{Err: fmt.Errorf("row iteration error in sheet %s: %w", sheet, err)}:
+					return
+				}
 			}
 			rows.Close()
 		}
@@ -145,7 +171,7 @@ func CollectSearchResults(ch <-chan SearchResultStream) ([]SearchResult, error) 
 
 // SearchSimple is a convenience function for simple searches
 func SearchSimple(f *excelize.File, pattern string, caseInsensitive bool) ([]SearchResult, error) {
-	ch, err := Search(f, pattern, SearchOptions{
+	ch, err := Search(context.Background(), f, pattern, SearchOptions{
 		CaseInsensitive: caseInsensitive,
 		Regex:           false,
 	})
@@ -157,7 +183,7 @@ func SearchSimple(f *excelize.File, pattern string, caseInsensitive bool) ([]Sea
 
 // SearchInSheet searches only within a specific sheet
 func SearchInSheet(f *excelize.File, sheet, pattern string, caseInsensitive bool) ([]SearchResult, error) {
-	ch, err := Search(f, pattern, SearchOptions{
+	ch, err := Search(context.Background(), f, pattern, SearchOptions{
 		Sheet:           sheet,
 		CaseInsensitive: caseInsensitive,
 		Regex:           false,
@@ -170,7 +196,7 @@ func SearchInSheet(f *excelize.File, sheet, pattern string, caseInsensitive bool
 
 // SearchRegex searches using a regex pattern
 func SearchRegex(f *excelize.File, pattern string, caseInsensitive bool) ([]SearchResult, error) {
-	ch, err := Search(f, pattern, SearchOptions{
+	ch, err := Search(context.Background(), f, pattern, SearchOptions{
 		CaseInsensitive: caseInsensitive,
 		Regex:           true,
 	})

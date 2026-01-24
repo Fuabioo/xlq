@@ -97,7 +97,13 @@ func (s *Server) registerTools() {
 func (s *Server) handleSheets(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	file := request.GetString("file", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -115,7 +121,13 @@ func (s *Server) handleInfo(ctx context.Context, request mcp.CallToolRequest) (*
 	file := request.GetString("file", "")
 	sheet := request.GetString("sheet", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -140,7 +152,13 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 	sheet := request.GetString("sheet", "")
 	rangeStr := request.GetString("range", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -199,7 +217,13 @@ func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*
 	}
 	n = min(n, MaxHeadRows)
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -240,7 +264,13 @@ func (s *Server) handleTail(ctx context.Context, request mcp.CallToolRequest) (*
 	}
 	n = min(n, MaxTailRows)
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -279,7 +309,13 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 	}
 	maxResults = min(maxResults, MaxSearchResults)
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -301,7 +337,7 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 		MaxResults:      maxResults,
 	}
 
-	ch, err := xlsx.Search(f, pattern, opts)
+	ch, err := xlsx.Search(ctx, f, pattern, opts)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -329,7 +365,13 @@ func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*
 	address := request.GetString("address", "")
 	sheet := request.GetString("sheet", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
