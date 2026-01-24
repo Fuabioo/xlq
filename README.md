@@ -13,7 +13,14 @@ xlq provides efficient, memory-bounded operations on Excel files. It can handle 
 
 ## Installation
 
-### From Source
+### Homebrew
+
+```bash
+brew tap Fuabioo/tap
+brew install xlq
+```
+
+### Built from Source
 
 ```bash
 git clone https://github.com/fuabioo/xlq.git
@@ -81,23 +88,19 @@ xlq head data.xlsx -n 5 --format tsv
 xlq can run as an MCP (Model Context Protocol) server for AI agent integration:
 
 ```bash
-xlq --mcp
+xlq mcp
 ```
 
 ### Claude Desktop Configuration
 
-Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "xlq": {
-      "command": "/path/to/xlq",
-      "args": ["--mcp"]
-    }
-  }
-}
+```bash
+claude mcp add --scope user --transport stdio excel xlq mcp
 ```
+
+```bash
+claude mcp remove excel
+```
+
 
 ### Available MCP Tools
 

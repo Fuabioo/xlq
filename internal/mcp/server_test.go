@@ -11,7 +11,8 @@ import (
 func TestNewServer(t *testing.T) {
 	srv := New()
 	if srv == nil {
-		t.Error("New() returned nil")
+		t.Fatal("New() returned nil")
+		return
 	}
 	if srv.mcpServer == nil {
 		t.Error("mcpServer is nil")
@@ -114,7 +115,8 @@ func TestJsonResultWithMetadata(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 			if result == nil {
-				t.Error("result is nil")
+				t.Fatal("result is nil")
+				return
 			}
 
 			// Verify the result contains our expected structure
