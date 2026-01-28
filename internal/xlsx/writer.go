@@ -620,3 +620,115 @@ func RenameSheet(path, oldName, newName string) (*SheetResult, error) {
 		Sheet:   newName,
 	}, nil
 }
+
+// InsertRows inserts rows at a specific position, shifting existing rows down.
+// The row parameter is 1-based. Enforces MaxAppendRows limit.
+func InsertRows(path, sheet string, row int, data [][]any) (*AppendResult, error) {
+	// 1. Validate len(data) <= MaxAppendRows
+	if len(data) > MaxAppendRows {
+		return nil, fmt.Errorf("%w: attempting to insert %d rows, limit is %d",
+			ErrRowLimitExceeded, len(data), MaxAppendRows)
+	}
+
+	// 2. Validate row >= 1
+	if row < 1 {
+		return nil, fmt.Errorf("invalid row number: %d (must be >= 1)", row)
+	}
+
+	// 3. OpenFileForWrite(path)
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 4. Resolve sheet name
+	resolvedSheet, err := ResolveSheetName(f, sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve sheet name: %w", err)
+	}
+
+	// 5. f.InsertRows(sheet, row, len(data)) - this shifts existing rows
+	if err := f.InsertRows(resolvedSheet, row, len(data)); err != nil {
+		return nil, fmt.Errorf("failed to insert rows at row %d: %w", row, err)
+	}
+
+	// 6. Write each row of data starting at `row`
+	for i, rowData := range data {
+		rowNum := row + i
+
+		// Convert []any to []any for SetSheetRow
+		cells := make([]any, len(rowData))
+		copy(cells, rowData)
+
+		// Use column A (1-based) as the starting cell
+		cellAddr := FormatCellAddress(1, rowNum)
+		if err := f.SetSheetRow(resolvedSheet, cellAddr, &cells); err != nil {
+			return nil, fmt.Errorf("failed to write row %d: %w", rowNum, err)
+		}
+	}
+
+	// 7. SaveFileAtomic()
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 8. Return AppendResult
+	endingRow := row + len(data) - 1
+	return &AppendResult{
+		Success:     true,
+		RowsAdded:   len(data),
+		StartingRow: row,
+		EndingRow:   endingRow,
+	}, nil
+}
+
+// DeleteRows deletes rows starting at startRow.
+// Both startRow and count are validated. Max 1000 rows can be deleted at once.
+func DeleteRows(path, sheet string, startRow, count int) (*DeleteRowsResult, error) {
+	// 1. Validate startRow >= 1 and count >= 1 and count <= MaxAppendRows
+	if startRow < 1 {
+		return nil, fmt.Errorf("invalid start row: %d (must be >= 1)", startRow)
+	}
+	if count < 1 {
+		return nil, fmt.Errorf("invalid count: %d (must be >= 1)", count)
+	}
+	if count > MaxAppendRows {
+		return nil, fmt.Errorf("%w: attempting to delete %d rows, limit is %d",
+			ErrRowLimitExceeded, count, MaxAppendRows)
+	}
+
+	// 2. OpenFileForWrite(path)
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 3. Resolve sheet name
+	resolvedSheet, err := ResolveSheetName(f, sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve sheet name: %w", err)
+	}
+
+	// 4. Delete rows in reverse order to maintain indices:
+	//    for i := startRow + count - 1; i >= startRow; i-- {
+	//        f.RemoveRow(sheet, i)
+	//    }
+	for i := startRow + count - 1; i >= startRow; i-- {
+		if err := f.RemoveRow(resolvedSheet, i); err != nil {
+			return nil, fmt.Errorf("failed to remove row %d: %w", i, err)
+		}
+	}
+
+	// 5. SaveFileAtomic()
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 6. Return DeleteRowsResult
+	return &DeleteRowsResult{
+		Success:     true,
+		RowsDeleted: count,
+	}, nil
+}

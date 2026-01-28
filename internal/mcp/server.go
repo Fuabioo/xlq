@@ -149,6 +149,24 @@ func (s *Server) registerTools() {
 		mcp.WithString("old_name", mcp.Required(), mcp.Description("Current name of the sheet")),
 		mcp.WithString("new_name", mcp.Required(), mcp.Description("New name for the sheet")),
 	), s.handleRenameSheet)
+
+	// insert_rows tool - Insert rows at a specific position
+	s.mcpServer.AddTool(mcp.NewTool("insert_rows",
+		mcp.WithDescription("Insert rows at a specific position, shifting existing rows down (max 1000 rows)"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
+		mcp.WithNumber("row", mcp.Required(), mcp.Description("Row number to insert at (1-based)")),
+		// data will be passed as JSON array via BindArguments
+	), s.handleInsertRows)
+
+	// delete_rows tool - Delete rows from sheet
+	s.mcpServer.AddTool(mcp.NewTool("delete_rows",
+		mcp.WithDescription("Delete rows from sheet (max 1000 rows)"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
+		mcp.WithNumber("start_row", mcp.Required(), mcp.Description("First row to delete (1-based)")),
+		mcp.WithNumber("count", mcp.Required(), mcp.Description("Number of rows to delete")),
+	), s.handleDeleteRows)
 }
 
 // Tool handlers
@@ -718,4 +736,87 @@ func jsonResultWithMetadata(data any, rowsReturned int, truncated bool, limit in
 	}
 
 	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+func (s *Server) handleInsertRows(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheet := request.GetString("sheet", "")
+	row := request.GetInt("row", 0)
+
+	// Parse data from request arguments
+	var args struct {
+		Data [][]any `json:"data"`
+	}
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to parse data: %v", err)), nil
+	}
+
+	// Validate data
+	if len(args.Data) == 0 {
+		return mcp.NewToolResultError("no data provided"), nil
+	}
+	if len(args.Data) > xlsx.MaxAppendRows {
+		return mcp.NewToolResultError(fmt.Sprintf("too many rows: %d exceeds limit of %d", len(args.Data), xlsx.MaxAppendRows)), nil
+	}
+
+	// Validate row number
+	if row < 1 {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid row number: %d (must be >= 1)", row)), nil
+	}
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.InsertRows
+	result, err := xlsx.InsertRows(validPath, sheet, row, args.Data)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleDeleteRows(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheet := request.GetString("sheet", "")
+	startRow := request.GetInt("start_row", 0)
+	count := request.GetInt("count", 0)
+
+	// Validate parameters
+	if startRow < 1 {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid start_row: %d (must be >= 1)", startRow)), nil
+	}
+	if count < 1 {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid count: %d (must be >= 1)", count)), nil
+	}
+	if count > xlsx.MaxAppendRows {
+		return mcp.NewToolResultError(fmt.Sprintf("too many rows to delete: %d exceeds limit of %d", count, xlsx.MaxAppendRows)), nil
+	}
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.DeleteRows
+	result, err := xlsx.DeleteRows(validPath, sheet, startRow, count)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
 }

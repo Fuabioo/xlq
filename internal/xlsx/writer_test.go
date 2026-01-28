@@ -1533,3 +1533,403 @@ func TestRenameSheetErrors(t *testing.T) {
 	}
 	t.Logf("error: %v", err)
 }
+
+func TestInsertRows(t *testing.T) {
+	// Create test file with 3 rows
+	path := createTestFile(t)
+
+	// Test 1: Insert 2 rows at position 2 (between row 1 and 2)
+	data := [][]any{
+		{"Inserted1", 100},
+		{"Inserted2", 200},
+	}
+
+	result, err := InsertRows(path, "Sheet1", 2, data)
+	if err != nil {
+		t.Fatalf("InsertRows failed: %v", err)
+	}
+
+	// Verify result
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+	if result.RowsAdded != 2 {
+		t.Errorf("expected 2 rows added, got %d", result.RowsAdded)
+	}
+	if result.StartingRow != 2 {
+		t.Errorf("expected starting row 2, got %d", result.StartingRow)
+	}
+	if result.EndingRow != 3 {
+		t.Errorf("expected ending row 3, got %d", result.EndingRow)
+	}
+
+	// Verify the data was inserted by reading the file
+	f, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for verification: %v", err)
+	}
+	defer f.Close()
+
+	// Check row 1 (unchanged)
+	val, err := f.GetCellValue("Sheet1", "A1")
+	if err != nil {
+		t.Fatalf("failed to read A1: %v", err)
+	}
+	if val != "Header1" {
+		t.Errorf("expected 'Header1' at A1, got %q", val)
+	}
+
+	// Check row 2 (inserted)
+	val, err = f.GetCellValue("Sheet1", "A2")
+	if err != nil {
+		t.Fatalf("failed to read A2: %v", err)
+	}
+	if val != "Inserted1" {
+		t.Errorf("expected 'Inserted1' at A2, got %q", val)
+	}
+
+	val, err = f.GetCellValue("Sheet1", "B2")
+	if err != nil {
+		t.Fatalf("failed to read B2: %v", err)
+	}
+	if val != "100" {
+		t.Errorf("expected '100' at B2, got %q", val)
+	}
+
+	// Check row 3 (inserted)
+	val, err = f.GetCellValue("Sheet1", "A3")
+	if err != nil {
+		t.Fatalf("failed to read A3: %v", err)
+	}
+	if val != "Inserted2" {
+		t.Errorf("expected 'Inserted2' at A3, got %q", val)
+	}
+
+	// Check row 4 (was row 2, shifted down)
+	val, err = f.GetCellValue("Sheet1", "A4")
+	if err != nil {
+		t.Fatalf("failed to read A4: %v", err)
+	}
+	if val != "Value1" {
+		t.Errorf("expected 'Value1' at A4 (shifted from A2), got %q", val)
+	}
+
+	// Test 2: Insert at row 1 (beginning)
+	data2 := [][]any{
+		{"First", 999},
+	}
+	result2, err := InsertRows(path, "Sheet1", 1, data2)
+	if err != nil {
+		t.Fatalf("InsertRows at row 1 failed: %v", err)
+	}
+	if result2.StartingRow != 1 {
+		t.Errorf("expected starting row 1, got %d", result2.StartingRow)
+	}
+
+	// Verify row 1 is now "First"
+	f2, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer f2.Close()
+
+	val, err = f2.GetCellValue("Sheet1", "A1")
+	if err != nil {
+		t.Fatalf("failed to read A1: %v", err)
+	}
+	if val != "First" {
+		t.Errorf("expected 'First' at A1, got %q", val)
+	}
+}
+
+func TestInsertRowsEmpty(t *testing.T) {
+	// Test inserting into an empty sheet
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.xlsx")
+
+	f := excelize.NewFile()
+	defer f.Close()
+
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("failed to create empty file: %v", err)
+	}
+
+	data := [][]any{
+		{"Row1", "Data1"},
+		{"Row2", "Data2"},
+	}
+
+	result, err := InsertRows(path, "Sheet1", 1, data)
+	if err != nil {
+		t.Fatalf("InsertRows to empty sheet failed: %v", err)
+	}
+
+	if result.StartingRow != 1 {
+		t.Errorf("expected starting row 1, got %d", result.StartingRow)
+	}
+
+	// Verify the data
+	f2, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer f2.Close()
+
+	val, err := f2.GetCellValue("Sheet1", "A1")
+	if err != nil {
+		t.Fatalf("failed to read A1: %v", err)
+	}
+	if val != "Row1" {
+		t.Errorf("expected 'Row1' at A1, got %q", val)
+	}
+}
+
+func TestInsertRowsLimit(t *testing.T) {
+	path := createTestFile(t)
+
+	// Try to insert more than MaxAppendRows
+	rows := make([][]any, MaxAppendRows+1)
+	for i := range rows {
+		rows[i] = []any{i}
+	}
+
+	_, err := InsertRows(path, "Sheet1", 1, rows)
+	if err == nil {
+		t.Fatal("expected error for exceeding row limit")
+	}
+	if !errors.Is(err, ErrRowLimitExceeded) {
+		t.Errorf("expected ErrRowLimitExceeded, got: %v", err)
+	}
+}
+
+func TestInsertRowsInvalidRow(t *testing.T) {
+	path := createTestFile(t)
+
+	data := [][]any{{"test"}}
+
+	// Test row < 1
+	_, err := InsertRows(path, "Sheet1", 0, data)
+	if err == nil {
+		t.Error("expected error for row < 1")
+	}
+	t.Logf("error for row 0: %v", err)
+
+	_, err = InsertRows(path, "Sheet1", -1, data)
+	if err == nil {
+		t.Error("expected error for row < 1")
+	}
+	t.Logf("error for row -1: %v", err)
+}
+
+func TestInsertRowsErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name  string
+		path  string
+		sheet string
+		row   int
+		data  [][]any
+	}{
+		{
+			name:  "non-existent file",
+			path:  filepath.Join(dir, "nonexistent.xlsx"),
+			sheet: "Sheet1",
+			row:   1,
+			data:  [][]any{{"test"}},
+		},
+		{
+			name:  "non-existent sheet",
+			path:  createTestFile(t),
+			sheet: "NonExistent",
+			row:   1,
+			data:  [][]any{{"test"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := InsertRows(tt.path, tt.sheet, tt.row, tt.data)
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+			t.Logf("error: %v", err)
+		})
+	}
+}
+
+func TestDeleteRows(t *testing.T) {
+	// Create test file with 3 rows
+	path := createTestFile(t)
+
+	// First, let's verify what we have initially
+	f, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open initial file: %v", err)
+	}
+	initialRows, err := getLastRow(f, "Sheet1")
+	f.Close()
+	if err != nil {
+		t.Fatalf("failed to get initial row count: %v", err)
+	}
+	t.Logf("Initial rows in Sheet1: %d", initialRows)
+
+	// Test 1: Delete 1 row at position 2
+	result, err := DeleteRows(path, "Sheet1", 2, 1)
+	if err != nil {
+		t.Fatalf("DeleteRows failed: %v", err)
+	}
+
+	// Verify result
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+	if result.RowsDeleted != 1 {
+		t.Errorf("expected 1 row deleted, got %d", result.RowsDeleted)
+	}
+
+	// Verify the row was deleted by reading the file
+	f2, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for verification: %v", err)
+	}
+	defer f2.Close()
+
+	// Check row 1 (unchanged)
+	val, err := f2.GetCellValue("Sheet1", "A1")
+	if err != nil {
+		t.Fatalf("failed to read A1: %v", err)
+	}
+	if val != "Header1" {
+		t.Errorf("expected 'Header1' at A1, got %q", val)
+	}
+
+	// Check row 2 (was row 3, shifted up after deleting original row 2)
+	val, err = f2.GetCellValue("Sheet1", "A2")
+	if err != nil {
+		t.Fatalf("failed to read A2: %v", err)
+	}
+	if val != "Value3" {
+		t.Errorf("expected 'Value3' at A2 (shifted from A3), got %q", val)
+	}
+
+	// Row 3 should now be empty or not exist
+	val, err = f2.GetCellValue("Sheet1", "A3")
+	if err != nil {
+		t.Fatalf("failed to read A3: %v", err)
+	}
+	if val != "" {
+		t.Logf("A3 has value: %q (expected empty)", val)
+	}
+
+	// Test 2: Delete multiple rows
+	// First, add more rows to test
+	_, err = AppendRows(path, "Sheet1", [][]any{
+		{"Value3", 33},
+		{"Value4", 44},
+		{"Value5", 55},
+	})
+	if err != nil {
+		t.Fatalf("failed to append rows for multi-delete test: %v", err)
+	}
+
+	// Delete 2 rows starting at row 3
+	result2, err := DeleteRows(path, "Sheet1", 3, 2)
+	if err != nil {
+		t.Fatalf("DeleteRows multiple failed: %v", err)
+	}
+	if result2.RowsDeleted != 2 {
+		t.Errorf("expected 2 rows deleted, got %d", result2.RowsDeleted)
+	}
+}
+
+func TestDeleteRowsLimit(t *testing.T) {
+	path := createTestFile(t)
+
+	// Try to delete more than MaxAppendRows
+	_, err := DeleteRows(path, "Sheet1", 1, MaxAppendRows+1)
+	if err == nil {
+		t.Fatal("expected error for exceeding row limit")
+	}
+	if !errors.Is(err, ErrRowLimitExceeded) {
+		t.Errorf("expected ErrRowLimitExceeded, got: %v", err)
+	}
+}
+
+func TestDeleteRowsInvalidParameters(t *testing.T) {
+	path := createTestFile(t)
+
+	tests := []struct {
+		name     string
+		startRow int
+		count    int
+	}{
+		{
+			name:     "startRow < 1",
+			startRow: 0,
+			count:    1,
+		},
+		{
+			name:     "startRow negative",
+			startRow: -1,
+			count:    1,
+		},
+		{
+			name:     "count < 1",
+			startRow: 1,
+			count:    0,
+		},
+		{
+			name:     "count negative",
+			startRow: 1,
+			count:    -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DeleteRows(path, "Sheet1", tt.startRow, tt.count)
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+			t.Logf("error: %v", err)
+		})
+	}
+}
+
+func TestDeleteRowsErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		path     string
+		sheet    string
+		startRow int
+		count    int
+	}{
+		{
+			name:     "non-existent file",
+			path:     filepath.Join(dir, "nonexistent.xlsx"),
+			sheet:    "Sheet1",
+			startRow: 1,
+			count:    1,
+		},
+		{
+			name:     "non-existent sheet",
+			path:     createTestFile(t),
+			sheet:    "NonExistent",
+			startRow: 1,
+			count:    1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DeleteRows(tt.path, tt.sheet, tt.startRow, tt.count)
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+			t.Logf("error: %v", err)
+		})
+	}
+}
