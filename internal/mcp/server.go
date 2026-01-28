@@ -588,6 +588,9 @@ func (s *Server) handleWriteRange(ctx context.Context, request mcp.CallToolReque
 	if len(args.Data) == 0 {
 		return mcp.NewToolResultError("no data provided"), nil
 	}
+	if len(args.Data[0]) == 0 {
+		return mcp.NewToolResultError("first row is empty"), nil
+	}
 
 	// Calculate total cells for early validation
 	totalCells := 0

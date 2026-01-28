@@ -466,13 +466,13 @@ func WriteRange(path, sheet, startCell string, data [][]any) (*WriteResult, erro
 	}
 
 	// 7. Return WriteResult with cell count
-	endCol := startCol + len(data[0]) - 1
-	if len(data) == 0 {
+	var endCol, endRow int
+	if len(data) == 0 || len(data[0]) == 0 {
 		endCol = startCol
-	}
-	endRow := startRow + len(data) - 1
-	if len(data) == 0 {
 		endRow = startRow
+	} else {
+		endCol = startCol + len(data[0]) - 1
+		endRow = startRow + len(data) - 1
 	}
 
 	rangeStr := fmt.Sprintf("%s:%s",
