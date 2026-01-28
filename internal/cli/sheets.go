@@ -25,7 +25,7 @@ var sheetsCmd = &cobra.Command{
 			return err
 		}
 
-		out, err := output.FormatSingle(GetFormat(), sheets)
+		out, err := output.FormatSingle(GetFormatFromCmd(cmd), sheets)
 		if err != nil {
 			return err
 		}

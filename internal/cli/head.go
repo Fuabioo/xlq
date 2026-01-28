@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -9,15 +10,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	headN int
-)
-
 var headCmd = &cobra.Command{
 	Use:   "head <file.xlsx> [sheet]",
 	Short: "Show first N rows",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		n, _ := cmd.Flags().GetInt("number")
+
 		f, err := xlsx.OpenFile(args[0])
 		if err != nil {
 			return err
@@ -34,7 +33,9 @@ var headCmd = &cobra.Command{
 			}
 		}
 
-		ch, err := xlsx.StreamHead(f, sheet, headN)
+		ctx := context.Background()
+
+		ch, err := xlsx.StreamHead(ctx, f, sheet, n)
 		if err != nil {
 			return err
 		}
@@ -45,7 +46,7 @@ var headCmd = &cobra.Command{
 		}
 
 		data := xlsx.RowsToStringSlice(rows)
-		out, err := output.FormatRows(GetFormat(), data)
+		out, err := output.FormatRows(GetFormatFromCmd(cmd), data)
 		if err != nil {
 			return err
 		}
@@ -56,6 +57,6 @@ var headCmd = &cobra.Command{
 }
 
 func init() {
-	headCmd.Flags().IntVarP(&headN, "number", "n", 10, "Number of rows to show")
+	headCmd.Flags().IntP("number", "n", 10, "Number of rows to show")
 	rootCmd.AddCommand(headCmd)
 }

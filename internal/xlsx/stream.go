@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/xuri/excelize/v2"
@@ -15,7 +16,8 @@ type RowResult struct {
 // StreamRows streams rows from startRow to endRow (1-based, inclusive)
 // If endRow is 0, streams to end of sheet
 // Returns a channel that yields rows and closes when done
-func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan RowResult, error) {
+// The context can be used to cancel the streaming operation
+func StreamRows(ctx context.Context, f *excelize.File, sheet string, startRow, endRow int) (<-chan RowResult, error) {
 	resolvedSheet, err := ResolveSheetName(f, sheet)
 	if err != nil {
 		return nil, err
@@ -48,8 +50,12 @@ func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan Ro
 
 			cols, err := rows.Columns()
 			if err != nil {
-				ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}:
+					return
+				}
 			}
 
 			cells := make([]Cell, len(cols))
@@ -63,11 +69,19 @@ func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan Ro
 				}
 			}
 
-			ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}:
+			}
 		}
 
 		if err := rows.Error(); err != nil {
-			ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}:
+			}
 		}
 	}()
 
@@ -75,7 +89,8 @@ func StreamRows(f *excelize.File, sheet string, startRow, endRow int) (<-chan Ro
 }
 
 // StreamRange streams cells within a specified range (e.g., "A1:C10")
-func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, error) {
+// The context can be used to cancel the streaming operation
+func StreamRange(ctx context.Context, f *excelize.File, sheet, rangeStr string) (<-chan RowResult, error) {
 	resolvedSheet, err := ResolveSheetName(f, sheet)
 	if err != nil {
 		return nil, err
@@ -113,8 +128,12 @@ func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, er
 
 			cols, err := rows.Columns()
 			if err != nil {
-				ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- RowResult{Err: fmt.Errorf("error reading row %d: %w", rowNum, err)}:
+					return
+				}
 			}
 
 			// Extract only columns in range
@@ -133,11 +152,19 @@ func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, er
 				})
 			}
 
-			ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Row: &Row{Number: rowNum, Cells: cells}}:
+			}
 		}
 
 		if err := rows.Error(); err != nil {
-			ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- RowResult{Err: fmt.Errorf("row iteration error: %w", err)}:
+			}
 		}
 	}()
 
@@ -145,16 +172,24 @@ func StreamRange(f *excelize.File, sheet, rangeStr string) (<-chan RowResult, er
 }
 
 // StreamHead streams the first n rows of a sheet
-func StreamHead(f *excelize.File, sheet string, n int) (<-chan RowResult, error) {
+func StreamHead(ctx context.Context, f *excelize.File, sheet string, n int) (<-chan RowResult, error) {
 	if n <= 0 {
 		n = 10 // Default to 10 rows
 	}
-	return StreamRows(f, sheet, 1, n)
+	return StreamRows(ctx, f, sheet, 1, n)
+}
+
+// rawRow stores raw column values before Cell construction
+// This avoids allocating Cell structs for every row during iteration
+type rawRow struct {
+	number int
+	values []string
 }
 
 // StreamTail returns the last n rows of a sheet
 // Unlike other streaming functions, this must read the entire sheet
 // and uses a ring buffer to keep memory bounded
+// Memory optimization: only constructs Cell structs for the final N rows returned
 func StreamTail(f *excelize.File, sheet string, n int) ([]Row, error) {
 	if n <= 0 {
 		n = 10 // Default to 10 rows
@@ -171,8 +206,12 @@ func StreamTail(f *excelize.File, sheet string, n int) ([]Row, error) {
 	}
 	defer rows.Close()
 
-	// Ring buffer for last N rows
-	buffer := make([]Row, n)
+	// Ring buffer for last N rows - stores raw values only
+	// Pre-allocate the rawRow structs to reuse memory
+	buffer := make([]rawRow, n)
+	for i := 0; i < n; i++ {
+		buffer[i].values = make([]string, 0) // Will grow as needed
+	}
 	bufIdx := 0
 	totalRows := 0
 
@@ -185,18 +224,21 @@ func StreamTail(f *excelize.File, sheet string, n int) ([]Row, error) {
 			return nil, fmt.Errorf("error reading row %d: %w", rowNum, err)
 		}
 
-		cells := make([]Cell, len(cols))
-		for i, val := range cols {
-			cells[i] = Cell{
-				Address: FormatCellAddress(i+1, rowNum),
-				Value:   val,
-				Type:    "string",
-				Row:     rowNum,
-				Col:     i + 1,
-			}
+		// Reuse the slice in the ring buffer position, but ensure capacity
+		// This way we only allocate N slices total, not one per row
+		currentSlot := &buffer[bufIdx]
+
+		// Resize the slice if needed
+		if cap(currentSlot.values) < len(cols) {
+			currentSlot.values = make([]string, len(cols))
+		} else {
+			currentSlot.values = currentSlot.values[:len(cols)]
 		}
 
-		buffer[bufIdx] = Row{Number: rowNum, Cells: cells}
+		// Copy the values (strings are immutable, so this is cheap)
+		copy(currentSlot.values, cols)
+		currentSlot.number = rowNum
+
 		bufIdx = (bufIdx + 1) % n
 		totalRows++
 	}
@@ -216,17 +258,37 @@ func StreamTail(f *excelize.File, sheet string, n int) ([]Row, error) {
 	}
 
 	result := make([]Row, resultSize)
+
 	if totalRows < n {
-		// Didn't fill the buffer, just copy from start
-		copy(result, buffer[:totalRows])
+		// Didn't fill the buffer, construct Cells from start
+		for i := 0; i < totalRows; i++ {
+			result[i] = constructRow(buffer[i])
+		}
 	} else {
 		// Buffer is full, read from bufIdx (oldest) to end, then start to bufIdx
+		// Now construct Cell structs ONLY for the N rows we're returning
 		for i := 0; i < n; i++ {
-			result[i] = buffer[(bufIdx+i)%n]
+			result[i] = constructRow(buffer[(bufIdx+i)%n])
 		}
 	}
 
 	return result, nil
+}
+
+// constructRow builds a Row with Cell structs from raw values
+// Only called for rows that will be returned to the caller
+func constructRow(raw rawRow) Row {
+	cells := make([]Cell, len(raw.values))
+	for i, val := range raw.values {
+		cells[i] = Cell{
+			Address: FormatCellAddress(i+1, raw.number),
+			Value:   val,
+			Type:    "string",
+			Row:     raw.number,
+			Col:     i + 1,
+		}
+	}
+	return Row{Number: raw.number, Cells: cells}
 }
 
 // CollectRows collects all rows from a channel into a slice
@@ -283,8 +345,8 @@ func RowsToStringSlice(rows []Row) [][]string {
 }
 
 // StreamRowsToStrings is a convenience function that collects and converts
-func StreamRowsToStrings(f *excelize.File, sheet string, startRow, endRow int) ([][]string, error) {
-	ch, err := StreamRows(f, sheet, startRow, endRow)
+func StreamRowsToStrings(ctx context.Context, f *excelize.File, sheet string, startRow, endRow int) ([][]string, error) {
+	ch, err := StreamRows(ctx, f, sheet, startRow, endRow)
 	if err != nil {
 		return nil, err
 	}

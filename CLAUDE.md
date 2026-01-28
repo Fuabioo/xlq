@@ -13,7 +13,7 @@
 ## Architecture Principles
 
 1. **Streaming-First**: Never load entire sheets into memory. Use `excelize.Rows()` streaming API exclusively.
-2. **Bounded Memory**: LRU cache for shared strings (max 10k entries). Ring buffers for tail operations.
+2. **Bounded Memory**: Ring buffers for tail operations. Future enhancement: LRU cache for shared strings.
 3. **Go Error Handling**: Always return errors, never panic. Wrap errors with context.
 4. **No CGO**: Pure Go for maximum portability and simple builds.
 5. **Small Files**: Keep files <500 lines, functions <50 lines.
@@ -127,9 +127,9 @@ xlq --mcp  # Run as MCP server
 ## Memory Management
 
 - Streaming API only (never `GetRows()` which loads entire sheet)
-- LRU cache with fixed capacity (10k entries)
 - Ring buffers for tail operations (bounded size)
 - Close file handles and iterators properly
+- Future enhancement: LRU cache for shared strings to optimize repeated cell access
 
 ## CLI Design
 

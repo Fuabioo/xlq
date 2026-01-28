@@ -97,7 +97,13 @@ func (s *Server) registerTools() {
 func (s *Server) handleSheets(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	file := request.GetString("file", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -115,7 +121,13 @@ func (s *Server) handleInfo(ctx context.Context, request mcp.CallToolRequest) (*
 	file := request.GetString("file", "")
 	sheet := request.GetString("sheet", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -140,7 +152,13 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 	sheet := request.GetString("sheet", "")
 	rangeStr := request.GetString("range", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -157,7 +175,7 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 
 	if rangeStr != "" {
 		// Read specific range - no limit needed
-		ch, err := xlsx.StreamRange(f, resolvedSheet, rangeStr)
+		ch, err := xlsx.StreamRange(ctx, f, resolvedSheet, rangeStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -168,7 +186,7 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 		truncated = false
 	} else {
 		// Read entire sheet with default limit
-		ch, err := xlsx.StreamRows(f, resolvedSheet, 0, 0)
+		ch, err := xlsx.StreamRows(ctx, f, resolvedSheet, 0, 0)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -193,15 +211,19 @@ func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*
 	sheet := request.GetString("sheet", "")
 	n := request.GetInt("n", DefaultHeadRows)
 
-	// Cap n at MaxHeadRows
-	if n > MaxHeadRows {
-		n = MaxHeadRows
-	}
+	// Cap n at MaxHeadRows and ensure it's at least 1
 	if n <= 0 {
 		n = DefaultHeadRows
 	}
+	n = min(n, MaxHeadRows)
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -213,7 +235,7 @@ func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	ch, err := xlsx.StreamHead(f, resolvedSheet, n)
+	ch, err := xlsx.StreamHead(ctx, f, resolvedSheet, n)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -236,15 +258,19 @@ func (s *Server) handleTail(ctx context.Context, request mcp.CallToolRequest) (*
 	sheet := request.GetString("sheet", "")
 	n := request.GetInt("n", DefaultTailRows)
 
-	// Cap n at MaxTailRows
-	if n > MaxTailRows {
-		n = MaxTailRows
-	}
+	// Cap n at MaxTailRows and ensure it's at least 1
 	if n <= 0 {
 		n = DefaultTailRows
 	}
+	n = min(n, MaxTailRows)
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -281,11 +307,15 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 	if maxResults <= 0 {
 		maxResults = DefaultSearchResults
 	}
-	if maxResults > MaxSearchResults {
-		maxResults = MaxSearchResults
+	maxResults = min(maxResults, MaxSearchResults)
+
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	f, err := xlsx.OpenFile(file)
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -307,7 +337,7 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 		MaxResults:      maxResults,
 	}
 
-	ch, err := xlsx.Search(f, pattern, opts)
+	ch, err := xlsx.Search(ctx, f, pattern, opts)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -335,7 +365,13 @@ func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*
 	address := request.GetString("address", "")
 	sheet := request.GetString("sheet", "")
 
-	f, err := xlsx.OpenFile(file)
+	// Validate path
+	validPath, err := ValidateFilePath(file)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	f, err := xlsx.OpenFile(validPath)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -357,7 +393,7 @@ func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*
 
 // Helper functions
 
-func jsonResult(v interface{}) (*mcp.CallToolResult, error) {
+func jsonResult(v any) (*mcp.CallToolResult, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("JSON encoding error: %v", err)), nil
@@ -371,10 +407,10 @@ func jsonResult(v interface{}) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-func jsonResultWithMetadata(data interface{}, rowsReturned int, truncated bool, limit int) (*mcp.CallToolResult, error) {
-	result := map[string]interface{}{
+func jsonResultWithMetadata(data any, rowsReturned int, truncated bool, limit int) (*mcp.CallToolResult, error) {
+	result := map[string]any{
 		"data": data,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"rows_returned": rowsReturned,
 			"truncated":     truncated,
 			"limit":         limit,

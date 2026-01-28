@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -47,8 +48,10 @@ func TestStreamRows(t *testing.T) {
 	}
 	defer f.Close()
 
+	ctx := context.Background()
+
 	// Stream rows 10-20
-	ch, err := StreamRows(f, "Sheet1", 10, 20)
+	ch, err := StreamRows(ctx, f, "Sheet1", 10, 20)
 	if err != nil {
 		t.Fatalf("StreamRows failed: %v", err)
 	}
@@ -81,7 +84,7 @@ func TestStreamRowsToEnd(t *testing.T) {
 	defer f.Close()
 
 	// Stream from row 45 to end (endRow = 0)
-	ch, err := StreamRows(f, "Sheet1", 45, 0)
+	ch, err := StreamRows(context.Background(), f, "Sheet1", 45, 0)
 	if err != nil {
 		t.Fatalf("StreamRows failed: %v", err)
 	}
@@ -109,7 +112,7 @@ func TestStreamRange(t *testing.T) {
 	}
 	defer f.Close()
 
-	ch, err := StreamRange(f, "Sheet1", "B5:C10")
+	ch, err := StreamRange(context.Background(), f, "Sheet1", "B5:C10")
 	if err != nil {
 		t.Fatalf("StreamRange failed: %v", err)
 	}
@@ -149,7 +152,7 @@ func TestStreamRangeSingleCell(t *testing.T) {
 	defer f.Close()
 
 	// Single cell range
-	ch, err := StreamRange(f, "Sheet1", "B5")
+	ch, err := StreamRange(context.Background(), f, "Sheet1", "B5")
 	if err != nil {
 		t.Fatalf("StreamRange failed: %v", err)
 	}
@@ -181,7 +184,7 @@ func TestStreamHead(t *testing.T) {
 	}
 	defer f.Close()
 
-	ch, err := StreamHead(f, "Sheet1", 5)
+	ch, err := StreamHead(context.Background(), f, "Sheet1", 5)
 	if err != nil {
 		t.Fatalf("StreamHead failed: %v", err)
 	}
@@ -214,7 +217,7 @@ func TestStreamHeadDefault(t *testing.T) {
 	defer f.Close()
 
 	// Pass 0 to test default behavior (should default to 10)
-	ch, err := StreamHead(f, "Sheet1", 0)
+	ch, err := StreamHead(context.Background(), f, "Sheet1", 0)
 	if err != nil {
 		t.Fatalf("StreamHead failed: %v", err)
 	}
@@ -367,7 +370,7 @@ func TestStreamRowsToStrings(t *testing.T) {
 	}
 	defer f.Close()
 
-	result, err := StreamRowsToStrings(f, "Sheet1", 1, 3)
+	result, err := StreamRowsToStrings(context.Background(), f, "Sheet1", 1, 3)
 	if err != nil {
 		t.Fatalf("StreamRowsToStrings failed: %v", err)
 	}
@@ -395,7 +398,7 @@ func TestStreamRowsInvalidSheet(t *testing.T) {
 	}
 	defer f.Close()
 
-	_, err = StreamRows(f, "NonExistentSheet", 1, 10)
+	_, err = StreamRows(context.Background(), f, "NonExistentSheet", 1, 10)
 	if err == nil {
 		t.Error("expected error for non-existent sheet, got nil")
 	}
@@ -410,7 +413,7 @@ func TestStreamRangeInvalidRange(t *testing.T) {
 	}
 	defer f.Close()
 
-	_, err = StreamRange(f, "Sheet1", "INVALID")
+	_, err = StreamRange(context.Background(), f, "Sheet1", "INVALID")
 	if err == nil {
 		t.Error("expected error for invalid range, got nil")
 	}
@@ -529,7 +532,7 @@ func TestStreamRowsDefaultSheet(t *testing.T) {
 	defer f.Close()
 
 	// Pass empty sheet name to test default sheet resolution
-	ch, err := StreamRows(f, "", 1, 5)
+	ch, err := StreamRows(context.Background(), f, "", 1, 5)
 	if err != nil {
 		t.Fatalf("StreamRows with default sheet failed: %v", err)
 	}
@@ -557,7 +560,7 @@ func BenchmarkStreamRows(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ch, err := StreamRows(f, "Sheet1", 1, 100)
+		ch, err := StreamRows(context.Background(), f, "Sheet1", 1, 100)
 		if err != nil {
 			b.Fatalf("StreamRows failed: %v", err)
 		}

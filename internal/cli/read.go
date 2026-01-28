@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -44,9 +45,14 @@ var readCmd = &cobra.Command{
 			}
 		}
 
+		ctx := context.Background()
+
 		var rows []xlsx.Row
+		var truncated bool
+
 		if rangeStr != "" {
-			ch, err := xlsx.StreamRange(f, sheet, rangeStr)
+			// Specific range - no limit needed
+			ch, err := xlsx.StreamRange(ctx, f, sheet, rangeStr)
 			if err != nil {
 				return err
 			}
@@ -55,18 +61,38 @@ var readCmd = &cobra.Command{
 				return err
 			}
 		} else {
-			ch, err := xlsx.StreamRows(f, sheet, 0, 0)
+			// Full sheet - apply limit
+			limit, err := cmd.Flags().GetInt("limit")
 			if err != nil {
 				return err
 			}
-			rows, err = xlsx.CollectRows(ch)
+
+			ch, err := xlsx.StreamRows(ctx, f, sheet, 0, 0)
 			if err != nil {
 				return err
+			}
+
+			if limit <= 0 {
+				rows, err = xlsx.CollectRows(ch)
+				if err != nil {
+					return err
+				}
+			} else {
+				var total int
+				rows, total, truncated, err = xlsx.CollectRowsWithLimit(ch, limit)
+				_ = total
+				if err != nil {
+					return err
+				}
 			}
 		}
 
+		if truncated {
+			fmt.Fprintf(os.Stderr, "Warning: Output truncated at limit (use --limit to adjust)\n")
+		}
+
 		data := xlsx.RowsToStringSlice(rows)
-		out, err := output.FormatRows(GetFormat(), data)
+		out, err := output.FormatRows(GetFormatFromCmd(cmd), data)
 		if err != nil {
 			return err
 		}
@@ -77,5 +103,6 @@ var readCmd = &cobra.Command{
 }
 
 func init() {
+	readCmd.Flags().IntP("limit", "l", 1000, "Maximum rows when no range specified (0 = unlimited)")
 	rootCmd.AddCommand(readCmd)
 }

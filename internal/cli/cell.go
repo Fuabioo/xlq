@@ -39,7 +39,7 @@ var cellCmd = &cobra.Command{
 			return err
 		}
 
-		out, err := output.FormatSingle(GetFormat(), cell)
+		out, err := output.FormatSingle(GetFormatFromCmd(cmd), cell)
 		if err != nil {
 			return err
 		}

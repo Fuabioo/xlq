@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -9,18 +10,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	searchIgnoreCase bool
-	searchRegex      bool
-	searchSheet      string
-	searchMax        int
-)
-
 var searchCmd = &cobra.Command{
 	Use:   "search <file.xlsx> <pattern>",
 	Short: "Search for cells matching pattern",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ignoreCase, _ := cmd.Flags().GetBool("ignore-case")
+		regex, _ := cmd.Flags().GetBool("regex")
+		sheet, _ := cmd.Flags().GetString("sheet")
+		max, _ := cmd.Flags().GetInt("max")
+
 		f, err := xlsx.OpenFile(args[0])
 		if err != nil {
 			return err
@@ -28,13 +27,15 @@ var searchCmd = &cobra.Command{
 		defer f.Close()
 
 		opts := xlsx.SearchOptions{
-			Sheet:           searchSheet,
-			CaseInsensitive: searchIgnoreCase,
-			Regex:           searchRegex,
-			MaxResults:      searchMax,
+			Sheet:           sheet,
+			CaseInsensitive: ignoreCase,
+			Regex:           regex,
+			MaxResults:      max,
 		}
 
-		ch, err := xlsx.Search(f, args[1], opts)
+		ctx := context.Background()
+
+		ch, err := xlsx.Search(ctx, f, args[1], opts)
 		if err != nil {
 			return err
 		}
@@ -44,7 +45,7 @@ var searchCmd = &cobra.Command{
 			return err
 		}
 
-		out, err := output.FormatSingle(GetFormat(), results)
+		out, err := output.FormatSingle(GetFormatFromCmd(cmd), results)
 		if err != nil {
 			return err
 		}
@@ -55,9 +56,9 @@ var searchCmd = &cobra.Command{
 }
 
 func init() {
-	searchCmd.Flags().BoolVarP(&searchIgnoreCase, "ignore-case", "i", false, "Case-insensitive search")
-	searchCmd.Flags().BoolVarP(&searchRegex, "regex", "r", false, "Treat pattern as regex")
-	searchCmd.Flags().StringVarP(&searchSheet, "sheet", "s", "", "Search only in specific sheet")
-	searchCmd.Flags().IntVarP(&searchMax, "max", "m", 0, "Maximum results (0 = unlimited)")
+	searchCmd.Flags().BoolP("ignore-case", "i", false, "Case-insensitive search")
+	searchCmd.Flags().BoolP("regex", "r", false, "Treat pattern as regex")
+	searchCmd.Flags().StringP("sheet", "s", "", "Search only in specific sheet")
+	searchCmd.Flags().IntP("max", "m", 0, "Maximum results (0 = unlimited)")
 	rootCmd.AddCommand(searchCmd)
 }

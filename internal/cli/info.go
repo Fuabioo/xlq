@@ -36,7 +36,7 @@ var infoCmd = &cobra.Command{
 			return err
 		}
 
-		out, err := output.FormatSingle(GetFormat(), info)
+		out, err := output.FormatSingle(GetFormatFromCmd(cmd), info)
 		if err != nil {
 			return err
 		}

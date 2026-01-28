@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -158,7 +159,7 @@ func TestSearchMaxResults(t *testing.T) {
 	}
 	defer f.Close()
 
-	ch, err := Search(f, "hello", SearchOptions{
+	ch, err := Search(context.Background(), f, "hello", SearchOptions{
 		CaseInsensitive: true,
 		MaxResults:      2,
 	})
@@ -219,7 +220,7 @@ func TestSearchInvalidRegex(t *testing.T) {
 	}
 	defer f.Close()
 
-	ch, err := Search(f, "[invalid", SearchOptions{Regex: true})
+	ch, err := Search(context.Background(), f, "[invalid", SearchOptions{Regex: true})
 	if err == nil {
 		// If channel was returned, drain it
 		for range ch {
