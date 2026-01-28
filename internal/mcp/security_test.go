@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -292,4 +293,315 @@ func copyTestFile(dst string) error {
 	}
 
 	return nil
+}
+
+// TestIsBlockedWritePath tests the blocked write path pattern matching
+func TestIsBlockedWritePath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		blocked bool
+	}{
+		// .git patterns
+		{name: "git directory", path: "/home/user/.git/config", blocked: true},
+		{name: "git file in subdir", path: "/home/user/project/.git/HEAD", blocked: true},
+		{name: "dot git file", path: "/home/user/.git", blocked: true},
+		{name: "git in path", path: "/home/user/.github/workflows/test.yml", blocked: false},
+
+		// node_modules
+		{name: "node_modules directory", path: "/project/node_modules/pkg/file.js", blocked: true},
+		{name: "node_modules-like but different", path: "/project/node_modules_backup/file.js", blocked: false},
+
+		// Environment files
+		{name: "env file", path: "/project/.env", blocked: true},
+		{name: "env file in subdir", path: "/project/config/.env", blocked: true},
+		{name: "env example not blocked", path: "/project/.env.example", blocked: false},
+
+		// Key files
+		{name: "pem key", path: "/home/user/certs/server.pem", blocked: true},
+		{name: "private key", path: "/home/user/.ssh/id_rsa", blocked: true},
+		{name: "ed25519 key", path: "/home/user/.ssh/id_ed25519", blocked: true},
+		{name: "p12 certificate", path: "/certs/cert.p12", blocked: true},
+		{name: "pfx certificate", path: "/certs/cert.pfx", blocked: true},
+		{name: "key extension", path: "/config/api.key", blocked: true},
+
+		// Database files
+		{name: "sqlite database", path: "/data/app.sqlite", blocked: true},
+		{name: "db file", path: "/data/database.db", blocked: true},
+
+		// Safe paths
+		{name: "xlsx file", path: "/data/report.xlsx", blocked: false},
+		{name: "txt file", path: "/docs/readme.txt", blocked: false},
+		{name: "json config", path: "/config/settings.json", blocked: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBlockedWritePath(tt.path)
+			if result != tt.blocked {
+				t.Errorf("isBlockedWritePath(%q) = %v, want %v", tt.path, result, tt.blocked)
+			}
+		})
+	}
+}
+
+// TestValidateWritePath tests write path validation
+func TestValidateWritePath(t *testing.T) {
+	// Setup test directory structure
+	tmpDir := t.TempDir()
+
+	// Create a writable directory
+	writeDir := filepath.Join(tmpDir, "writable")
+	err := os.Mkdir(writeDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+
+	// Create an existing file
+	existingFile := filepath.Join(writeDir, "existing.xlsx")
+	err = os.WriteFile(existingFile, []byte("test"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create existing file: %v", err)
+	}
+
+	// Create a read-only directory (will be cleaned up by t.TempDir())
+	readOnlyDir := filepath.Join(tmpDir, "readonly")
+	err = os.Mkdir(readOnlyDir, 0555)
+	if err != nil {
+		t.Fatalf("Failed to create read-only directory: %v", err)
+	}
+
+	// Save original AllowedBasePaths and restore after test
+	origBasePaths := AllowedBasePaths
+	defer func() { AllowedBasePaths = origBasePaths }()
+
+	// Set allowed base paths to our test directory
+	AllowedBasePaths = []string{tmpDir}
+
+	tests := []struct {
+		name           string
+		path           string
+		allowOverwrite bool
+		expectError    bool
+		errorContains  string
+	}{
+		{
+			name:           "New file in writable directory",
+			path:           filepath.Join(writeDir, "new.xlsx"),
+			allowOverwrite: false,
+			expectError:    false,
+		},
+		{
+			name:           "Existing file without overwrite",
+			path:           existingFile,
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "file already exists",
+		},
+		{
+			name:           "Existing file with overwrite",
+			path:           existingFile,
+			allowOverwrite: true,
+			expectError:    false,
+		},
+		{
+			name:           "Empty path",
+			path:           "",
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "cannot be empty",
+		},
+		{
+			name:           "Parent directory doesn't exist",
+			path:           filepath.Join(tmpDir, "nonexistent", "file.xlsx"),
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "parent directory does not exist",
+		},
+		{
+			name:           "Path outside allowed directories",
+			path:           "/tmp/outside.xlsx",
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "outside allowed directories",
+		},
+		{
+			name:           "Blocked pattern - .env",
+			path:           filepath.Join(writeDir, ".env"),
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "sensitive path",
+		},
+		{
+			name:           "Blocked pattern - .key file",
+			path:           filepath.Join(writeDir, "secret.key"),
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "sensitive path",
+		},
+		{
+			name:           "Blocked pattern - .pem file",
+			path:           filepath.Join(writeDir, "cert.pem"),
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "sensitive path",
+		},
+		{
+			name:           "Blocked pattern - .git directory",
+			path:           filepath.Join(tmpDir, ".git", "config"),
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "sensitive path",
+		},
+		{
+			name:           "Read-only parent directory",
+			path:           filepath.Join(readOnlyDir, "file.xlsx"),
+			allowOverwrite: false,
+			expectError:    true,
+			errorContains:  "not writable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ValidateWritePath(tt.path, tt.allowOverwrite)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none. Path: %s", result)
+				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
+					t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if result == "" {
+					t.Error("Expected non-empty result path")
+				}
+			}
+		})
+	}
+}
+
+// TestCheckFileSize tests file size validation
+func TestCheckFileSize(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a small file (1KB)
+	smallFile := filepath.Join(tmpDir, "small.xlsx")
+	smallData := make([]byte, 1024) // 1KB
+	err := os.WriteFile(smallFile, smallData, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create small file: %v", err)
+	}
+
+	// Create a large file (100KB)
+	largeFile := filepath.Join(tmpDir, "large.xlsx")
+	largeData := make([]byte, 100*1024) // 100KB
+	err = os.WriteFile(largeFile, largeData, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create large file: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		maxSize     int64
+		expectError bool
+	}{
+		{
+			name:        "Small file under limit",
+			path:        smallFile,
+			maxSize:     10 * 1024, // 10KB limit
+			expectError: false,
+		},
+		{
+			name:        "Large file over limit",
+			path:        largeFile,
+			maxSize:     50 * 1024, // 50KB limit
+			expectError: true,
+		},
+		{
+			name:        "File at exact limit",
+			path:        largeFile,
+			maxSize:     100 * 1024, // Exactly 100KB
+			expectError: false,
+		},
+		{
+			name:        "Non-existent file",
+			path:        filepath.Join(tmpDir, "nonexistent.xlsx"),
+			maxSize:     10 * 1024,
+			expectError: false, // No error for non-existent files
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckFileSize(tt.path, tt.maxSize)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				} else {
+					t.Logf("Got expected error: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateWritePathSymlinks tests symlink handling in write validation
+func TestValidateWritePathSymlinks(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create allowed directory
+	allowedDir := filepath.Join(tmpDir, "allowed")
+	err := os.Mkdir(allowedDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create allowed directory: %v", err)
+	}
+
+	// Create disallowed directory
+	disallowedDir := filepath.Join(tmpDir, "disallowed")
+	err = os.Mkdir(disallowedDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create disallowed directory: %v", err)
+	}
+
+	// Create a target file in disallowed directory
+	targetFile := filepath.Join(disallowedDir, "target.xlsx")
+	err = os.WriteFile(targetFile, []byte("test"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create target file: %v", err)
+	}
+
+	// Create symlink in allowed directory pointing to disallowed location
+	symlinkPath := filepath.Join(allowedDir, "symlink.xlsx")
+	err = os.Symlink(targetFile, symlinkPath)
+	if err != nil {
+		t.Skipf("Cannot create symlink: %v", err)
+	}
+
+	// Set allowed base paths
+	origBasePaths := AllowedBasePaths
+	defer func() { AllowedBasePaths = origBasePaths }()
+	AllowedBasePaths = []string{allowedDir}
+
+	// Try to write via symlink - should be blocked because real path is outside allowed
+	_, err = ValidateWritePath(symlinkPath, true)
+	if err == nil {
+		t.Error("Expected symlink to disallowed location to be blocked, but it was allowed")
+	} else {
+		t.Logf("Symlink correctly blocked: %v", err)
+	}
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

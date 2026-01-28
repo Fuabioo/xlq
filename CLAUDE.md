@@ -133,6 +133,7 @@ xlq --mcp  # Run as MCP server
 
 ## CLI Design
 
+### Read Operations
 ```bash
 xlq sheets <file.xlsx>                    # List sheets
 xlq info <file.xlsx> [sheet]              # Sheet metadata
@@ -141,6 +142,17 @@ xlq head <file.xlsx> [sheet] [-n 10]      # First N rows
 xlq tail <file.xlsx> [sheet] [-n 10]      # Last N rows
 xlq search <file.xlsx> <pattern>          # Search cells
 xlq cell <file.xlsx> [sheet] <A1>         # Get cell value
+```
+
+### Write Operations
+```bash
+xlq write <file.xlsx> <cell> <value>      # Write cell value
+xlq create <file.xlsx>                    # Create new file
+xlq append <file.xlsx> <data.json>        # Append rows from JSON
+```
+
+### Server Mode
+```bash
 xlq --mcp                                 # Run as MCP server
 ```
 
@@ -153,6 +165,13 @@ xlq --mcp                                 # Run as MCP server
 ## MCP Tools
 
 Each CLI command maps to an MCP tool:
+
+**Read Tools:**
 - `sheets`, `info`, `read`, `head`, `tail`, `search`, `cell`
+
+**Write Tools:**
+- `write_cell`, `append_rows`, `create_file`, `write_range`
+- `create_sheet`, `delete_sheet`, `rename_sheet`
+- `insert_rows`, `delete_rows`
 
 All tools use JSON schema for input validation.
