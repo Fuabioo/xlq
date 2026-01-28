@@ -227,3 +227,189 @@ func getLastRow(f *excelize.File, sheet string) (int, error) {
 
 	return lastRow, err
 }
+
+// WriteCell writes a value to a specific cell in an xlsx file.
+// It opens the file, writes the cell, and saves atomically.
+// Returns the previous value for confirmation.
+func WriteCell(path, sheet, cell string, value any, valueType string) (*WriteResult, error) {
+	// 1. Open file for write
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 2. Resolve sheet name (use empty string for default sheet)
+	resolvedSheet, err := ResolveSheetName(f, sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve sheet name: %w", err)
+	}
+
+	// 3. Get previous value
+	previousValue, err := f.GetCellValue(resolvedSheet, cell)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get previous cell value: %w", err)
+	}
+
+	// 4. Use setCellWithType to write new value
+	if err := setCellWithType(f, resolvedSheet, cell, value, valueType); err != nil {
+		return nil, fmt.Errorf("failed to write cell: %w", err)
+	}
+
+	// 5. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 6. Return WriteResult
+	return &WriteResult{
+		Success:       true,
+		Cell:          cell,
+		PreviousValue: previousValue,
+		NewValue:      value,
+	}, nil
+}
+
+// AppendRows appends rows to the end of a sheet.
+// It finds the last row and writes new data starting at lastRow+1.
+// Enforces MaxAppendRows limit.
+func AppendRows(path, sheet string, rows [][]any) (*AppendResult, error) {
+	// 1. Validate row count
+	if len(rows) > MaxAppendRows {
+		return nil, fmt.Errorf("%w: attempting to append %d rows, limit is %d",
+			ErrRowLimitExceeded, len(rows), MaxAppendRows)
+	}
+
+	// 2. Open file for write
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 3. Resolve sheet name
+	resolvedSheet, err := ResolveSheetName(f, sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve sheet name: %w", err)
+	}
+
+	// 4. Use getLastRow to find last row
+	lastRow, err := getLastRow(f, resolvedSheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get last row: %w", err)
+	}
+
+	// 5. Write each row using f.SetSheetRow()
+	startingRow := lastRow + 1
+	for i, row := range rows {
+		rowNum := startingRow + i
+
+		// Convert []any to []any for SetSheetRow
+		cells := make([]any, len(row))
+		copy(cells, row)
+
+		// Use column A (1-based) as the starting cell
+		cellAddr := FormatCellAddress(1, rowNum)
+		if err := f.SetSheetRow(resolvedSheet, cellAddr, &cells); err != nil {
+			return nil, fmt.Errorf("failed to write row %d: %w", rowNum, err)
+		}
+	}
+
+	// 6. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 7. Return AppendResult
+	endingRow := startingRow + len(rows) - 1
+	return &AppendResult{
+		Success:     true,
+		RowsAdded:   len(rows),
+		StartingRow: startingRow,
+		EndingRow:   endingRow,
+	}, nil
+}
+
+// CreateFile creates a new xlsx file with optional initial data.
+// Uses StreamWriter for efficiency when writing many rows.
+func CreateFile(path, sheetName string, headers []string, rows [][]any, overwrite bool) (*CreateFileResult, error) {
+	// 1. Validate row count
+	if len(rows) > MaxCreateFileRows {
+		return nil, fmt.Errorf("%w: attempting to create file with %d rows, limit is %d",
+			ErrRowLimitExceeded, len(rows), MaxCreateFileRows)
+	}
+
+	// 2. Check if file exists
+	if _, err := os.Stat(path); err == nil {
+		// File exists
+		if !overwrite {
+			return nil, fmt.Errorf("%w: %s", ErrFileExists, path)
+		}
+	} else if !os.IsNotExist(err) {
+		// Some other error occurred while checking
+		return nil, fmt.Errorf("failed to check if file exists: %w", err)
+	}
+
+	// 3. Create new file
+	f := excelize.NewFile()
+	defer f.Close()
+
+	// 4. Rename default "Sheet1" to sheetName if provided
+	finalSheetName := "Sheet1"
+	if sheetName != "" {
+		finalSheetName = sheetName
+		// Get the default sheet index
+		defaultSheetIndex, err := f.GetSheetIndex("Sheet1")
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default sheet index: %w", err)
+		}
+		// Rename the default sheet
+		if err := f.SetSheetName("Sheet1", finalSheetName); err != nil {
+			return nil, fmt.Errorf("failed to rename sheet: %w", err)
+		}
+		// Set as active sheet
+		f.SetActiveSheet(defaultSheetIndex)
+	}
+
+	rowsWritten := 0
+	currentRow := 1
+
+	// 5. If headers provided, write to row 1
+	if len(headers) > 0 {
+		headerCells := make([]any, len(headers))
+		for i, header := range headers {
+			headerCells[i] = header
+		}
+		cellAddr := FormatCellAddress(1, currentRow)
+		if err := f.SetSheetRow(finalSheetName, cellAddr, &headerCells); err != nil {
+			return nil, fmt.Errorf("failed to write headers: %w", err)
+		}
+		rowsWritten++
+		currentRow++
+	}
+
+	// 6. Write rows
+	for _, row := range rows {
+		cells := make([]any, len(row))
+		copy(cells, row)
+		cellAddr := FormatCellAddress(1, currentRow)
+		if err := f.SetSheetRow(finalSheetName, cellAddr, &cells); err != nil {
+			return nil, fmt.Errorf("failed to write row %d: %w", currentRow, err)
+		}
+		rowsWritten++
+		currentRow++
+	}
+
+	// 7. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 8. Return CreateFileResult
+	return &CreateFileResult{
+		Success:     true,
+		File:        path,
+		SheetName:   finalSheetName,
+		RowsWritten: rowsWritten,
+	}, nil
+}

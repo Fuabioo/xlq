@@ -90,6 +90,33 @@ func (s *Server) registerTools() {
 		mcp.WithString("address", mcp.Required(), mcp.Description("Cell address (e.g., A1, B23)")),
 		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
 	), s.handleCell)
+
+	// write_cell tool - Write to a specific cell
+	s.mcpServer.AddTool(mcp.NewTool("write_cell",
+		mcp.WithDescription("Write a value to a specific cell in an Excel file"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
+		mcp.WithString("cell", mcp.Required(), mcp.Description("Cell address (e.g., A1, B23)")),
+		mcp.WithString("value", mcp.Required(), mcp.Description("Value to write")),
+		mcp.WithString("type", mcp.Description("Value type: auto, string, number, bool, formula (default: auto)")),
+	), s.handleWriteCell)
+
+	// append_rows tool - Append rows to sheet
+	s.mcpServer.AddTool(mcp.NewTool("append_rows",
+		mcp.WithDescription("Append rows to the end of a sheet (max 1000 rows per call)"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
+		// rows parameter will be passed as JSON array via BindArguments
+	), s.handleAppendRows)
+
+	// create_file tool - Create new Excel file
+	s.mcpServer.AddTool(mcp.NewTool("create_file",
+		mcp.WithDescription("Create a new Excel file with optional initial data"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path for new xlsx file")),
+		mcp.WithString("sheet_name", mcp.Description("Name of first sheet (default: Sheet1)")),
+		mcp.WithBoolean("overwrite", mcp.Description("Allow overwriting existing file (default: false)")),
+		// headers and rows will be passed as JSON arrays via BindArguments
+	), s.handleCreateFile)
 }
 
 // Tool handlers
@@ -389,6 +416,109 @@ func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*
 	}
 
 	return jsonResult(cell)
+}
+
+func (s *Server) handleWriteCell(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheet := request.GetString("sheet", "")
+	cell := request.GetString("cell", "")
+	value := request.GetString("value", "")
+	valueType := request.GetString("type", "auto")
+
+	// 1. Validate write path - allow overwrite for existing files
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.WriteCell
+	result, err := xlsx.WriteCell(validPath, sheet, cell, value, valueType)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleAppendRows(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheet := request.GetString("sheet", "")
+
+	// Parse rows from request arguments using BindArguments
+	var args struct {
+		Rows [][]any `json:"rows"`
+	}
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to parse rows: %v", err)), nil
+	}
+
+	// Validate row count
+	if len(args.Rows) == 0 {
+		return mcp.NewToolResultError("no rows provided"), nil
+	}
+	if len(args.Rows) > xlsx.MaxAppendRows {
+		return mcp.NewToolResultError(fmt.Sprintf("too many rows: %d exceeds limit of %d", len(args.Rows), xlsx.MaxAppendRows)), nil
+	}
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.AppendRows
+	result, err := xlsx.AppendRows(validPath, sheet, args.Rows)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleCreateFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheetName := request.GetString("sheet_name", "Sheet1")
+	overwrite := request.GetBool("overwrite", false)
+
+	// Parse headers and rows from request arguments
+	var args struct {
+		Headers []string `json:"headers"`
+		Rows    [][]any  `json:"rows"`
+	}
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to parse arguments: %v", err)), nil
+	}
+
+	// Validate row count
+	if len(args.Rows) > xlsx.MaxCreateFileRows {
+		return mcp.NewToolResultError(fmt.Sprintf("too many rows: %d exceeds limit of %d", len(args.Rows), xlsx.MaxCreateFileRows)), nil
+	}
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, overwrite)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. No need to check file size for new files
+
+	// 3. Call xlsx.CreateFile
+	result, err := xlsx.CreateFile(validPath, sheetName, args.Headers, args.Rows, overwrite)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
 }
 
 // Helper functions
