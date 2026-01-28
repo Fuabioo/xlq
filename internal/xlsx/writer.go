@@ -413,3 +413,210 @@ func CreateFile(path, sheetName string, headers []string, rows [][]any, overwrit
 		RowsWritten: rowsWritten,
 	}, nil
 }
+
+// WriteRange writes a 2D array of values starting at the specified cell.
+// The data array is rows x columns. Enforces MaxWriteRangeCells limit.
+func WriteRange(path, sheet, startCell string, data [][]any) (*WriteResult, error) {
+	// 1. Calculate total cells and validate against MaxWriteRangeCells
+	totalCells := 0
+	for _, row := range data {
+		totalCells += len(row)
+	}
+	if totalCells > MaxWriteRangeCells {
+		return nil, fmt.Errorf("%w: attempting to write %d cells, limit is %d",
+			ErrCellLimitExceeded, totalCells, MaxWriteRangeCells)
+	}
+
+	// 2. Open file for write
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 3. Resolve sheet name
+	resolvedSheet, err := ResolveSheetName(f, sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve sheet name: %w", err)
+	}
+
+	// 4. Parse startCell to get starting row/col
+	startCol, startRow, err := ParseCellAddress(startCell)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse start cell %s: %w", startCell, err)
+	}
+
+	// 5. Iterate data and write each cell using setCellWithType
+	for rowOffset, row := range data {
+		currentRow := startRow + rowOffset
+		for colOffset, value := range row {
+			currentCol := startCol + colOffset
+			cellAddr := FormatCellAddress(currentCol, currentRow)
+
+			// Use auto type detection for each value
+			if err := setCellWithType(f, resolvedSheet, cellAddr, value, "auto"); err != nil {
+				return nil, fmt.Errorf("failed to write cell %s: %w", cellAddr, err)
+			}
+		}
+	}
+
+	// 6. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 7. Return WriteResult with cell count
+	endCol := startCol + len(data[0]) - 1
+	if len(data) == 0 {
+		endCol = startCol
+	}
+	endRow := startRow + len(data) - 1
+	if len(data) == 0 {
+		endRow = startRow
+	}
+
+	rangeStr := fmt.Sprintf("%s:%s",
+		FormatCellAddress(startCol, startRow),
+		FormatCellAddress(endCol, endRow))
+
+	return &WriteResult{
+		Success:  true,
+		Cell:     rangeStr,
+		NewValue: fmt.Sprintf("Wrote %d cells", totalCells),
+	}, nil
+}
+
+// CreateSheet creates a new sheet in an existing workbook.
+// Optionally writes a header row.
+func CreateSheet(path, name string, headers []string) (*SheetResult, error) {
+	// 1. Open file for write
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 2. Check if sheet already exists
+	sheetIndex, err := f.GetSheetIndex(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if sheet exists: %w", err)
+	}
+	if sheetIndex != -1 {
+		return nil, fmt.Errorf("%w: sheet %s already exists", ErrSheetExists, name)
+	}
+
+	// 3. Create new sheet
+	_, err = f.NewSheet(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sheet %s: %w", name, err)
+	}
+
+	// 4. If headers provided, write to row 1
+	if len(headers) > 0 {
+		headerCells := make([]any, len(headers))
+		for i, header := range headers {
+			headerCells[i] = header
+		}
+		cellAddr := FormatCellAddress(1, 1)
+		if err := f.SetSheetRow(name, cellAddr, &headerCells); err != nil {
+			return nil, fmt.Errorf("failed to write headers: %w", err)
+		}
+	}
+
+	// 5. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 6. Return SheetResult
+	return &SheetResult{
+		Success: true,
+		Sheet:   name,
+	}, nil
+}
+
+// DeleteSheet deletes a sheet from the workbook.
+// Returns error if trying to delete the last sheet.
+func DeleteSheet(path, sheet string) (*SheetResult, error) {
+	// 1. Open file for write
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 2. Verify sheet exists
+	sheetIndex, err := f.GetSheetIndex(sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check sheet index: %w", err)
+	}
+	if sheetIndex == -1 {
+		return nil, fmt.Errorf("%w: sheet %s does not exist", ErrSheetNotFound, sheet)
+	}
+
+	// 3. Verify it's not the last sheet
+	sheets := f.GetSheetList()
+	if len(sheets) <= 1 {
+		return nil, fmt.Errorf("%w: workbook must have at least one sheet", ErrCannotDeleteLastSheet)
+	}
+
+	// 4. Delete the sheet
+	if err := f.DeleteSheet(sheet); err != nil {
+		return nil, fmt.Errorf("failed to delete sheet %s: %w", sheet, err)
+	}
+
+	// 5. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 6. Return SheetResult
+	return &SheetResult{
+		Success: true,
+		Sheet:   sheet,
+	}, nil
+}
+
+// RenameSheet renames a sheet in the workbook.
+func RenameSheet(path, oldName, newName string) (*SheetResult, error) {
+	// 1. Open file for write
+	f, err := OpenFileForWrite(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for write: %w", err)
+	}
+	defer f.Close()
+
+	// 2. Verify old sheet exists
+	oldSheetIndex, err := f.GetSheetIndex(oldName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check old sheet index: %w", err)
+	}
+	if oldSheetIndex == -1 {
+		return nil, fmt.Errorf("%w: sheet %s does not exist", ErrSheetNotFound, oldName)
+	}
+
+	// 3. Verify new name doesn't exist
+	newSheetIndex, err := f.GetSheetIndex(newName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check new sheet name: %w", err)
+	}
+	if newSheetIndex != -1 {
+		return nil, fmt.Errorf("%w: sheet %s already exists", ErrSheetExists, newName)
+	}
+
+	// 4. Rename the sheet
+	if err := f.SetSheetName(oldName, newName); err != nil {
+		return nil, fmt.Errorf("failed to rename sheet from %s to %s: %w", oldName, newName, err)
+	}
+
+	// 5. Save atomically
+	if err := SaveFileAtomic(f, path); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// 6. Return SheetResult
+	return &SheetResult{
+		Success: true,
+		Sheet:   newName,
+	}, nil
+}

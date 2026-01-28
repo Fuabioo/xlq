@@ -117,6 +117,38 @@ func (s *Server) registerTools() {
 		mcp.WithBoolean("overwrite", mcp.Description("Allow overwriting existing file (default: false)")),
 		// headers and rows will be passed as JSON arrays via BindArguments
 	), s.handleCreateFile)
+
+	// write_range tool - Write to a range of cells
+	s.mcpServer.AddTool(mcp.NewTool("write_range",
+		mcp.WithDescription("Write a 2D array of values to a range of cells starting at start_cell (max 10000 cells)"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("sheet", mcp.Description("Sheet name (default: first sheet)")),
+		mcp.WithString("start_cell", mcp.Required(), mcp.Description("Starting cell address (e.g., A1, B2)")),
+		// data will be passed as JSON array via BindArguments
+	), s.handleWriteRange)
+
+	// create_sheet tool - Create a new sheet
+	s.mcpServer.AddTool(mcp.NewTool("create_sheet",
+		mcp.WithDescription("Create a new sheet in an existing workbook with optional headers"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Name for the new sheet")),
+		// headers will be passed as JSON array via BindArguments
+	), s.handleCreateSheet)
+
+	// delete_sheet tool - Delete a sheet
+	s.mcpServer.AddTool(mcp.NewTool("delete_sheet",
+		mcp.WithDescription("Delete a sheet from the workbook (cannot delete the last sheet)"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("sheet", mcp.Required(), mcp.Description("Name of sheet to delete")),
+	), s.handleDeleteSheet)
+
+	// rename_sheet tool - Rename a sheet
+	s.mcpServer.AddTool(mcp.NewTool("rename_sheet",
+		mcp.WithDescription("Rename a sheet in the workbook"),
+		mcp.WithString("file", mcp.Required(), mcp.Description("Path to xlsx file")),
+		mcp.WithString("old_name", mcp.Required(), mcp.Description("Current name of the sheet")),
+		mcp.WithString("new_name", mcp.Required(), mcp.Description("New name for the sheet")),
+	), s.handleRenameSheet)
 }
 
 // Tool handlers
@@ -514,6 +546,134 @@ func (s *Server) handleCreateFile(ctx context.Context, request mcp.CallToolReque
 
 	// 3. Call xlsx.CreateFile
 	result, err := xlsx.CreateFile(validPath, sheetName, args.Headers, args.Rows, overwrite)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleWriteRange(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheet := request.GetString("sheet", "")
+	startCell := request.GetString("start_cell", "")
+
+	// Parse data from request arguments
+	var args struct {
+		Data [][]any `json:"data"`
+	}
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to parse data: %v", err)), nil
+	}
+
+	// Validate data
+	if len(args.Data) == 0 {
+		return mcp.NewToolResultError("no data provided"), nil
+	}
+
+	// Calculate total cells for early validation
+	totalCells := 0
+	for _, row := range args.Data {
+		totalCells += len(row)
+	}
+	if totalCells > xlsx.MaxWriteRangeCells {
+		return mcp.NewToolResultError(fmt.Sprintf("too many cells: %d exceeds limit of %d", totalCells, xlsx.MaxWriteRangeCells)), nil
+	}
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.WriteRange
+	result, err := xlsx.WriteRange(validPath, sheet, startCell, args.Data)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleCreateSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	name := request.GetString("name", "")
+
+	// Parse headers from request arguments
+	var args struct {
+		Headers []string `json:"headers"`
+	}
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to parse headers: %v", err)), nil
+	}
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.CreateSheet
+	result, err := xlsx.CreateSheet(validPath, name, args.Headers)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleDeleteSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	sheet := request.GetString("sheet", "")
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.DeleteSheet
+	result, err := xlsx.DeleteSheet(validPath, sheet)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleRenameSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	file := request.GetString("file", "")
+	oldName := request.GetString("old_name", "")
+	newName := request.GetString("new_name", "")
+
+	// 1. Validate write path
+	validPath, err := ValidateWritePath(file, true)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 2. Check file size
+	if err := CheckFileSize(validPath, xlsx.MaxWriteFileSize); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 3. Call xlsx.RenameSheet
+	result, err := xlsx.RenameSheet(validPath, oldName, newName)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

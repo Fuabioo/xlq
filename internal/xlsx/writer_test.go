@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1088,4 +1089,447 @@ func TestCreateFileRowLimit(t *testing.T) {
 	if !errors.Is(err, ErrRowLimitExceeded) {
 		t.Errorf("expected ErrRowLimitExceeded, got: %v", err)
 	}
+}
+
+func TestWriteRange(t *testing.T) {
+	// Create test file
+	path := createTestFile(t)
+
+	// Test 1: Write a 3x3 range starting at B2
+	data := [][]any{
+		{"R1C1", "R1C2", "R1C3"},
+		{100, 200, 300},
+		{true, false, true},
+	}
+
+	result, err := WriteRange(path, "Sheet1", "B2", data)
+	if err != nil {
+		t.Fatalf("WriteRange failed: %v", err)
+	}
+
+	// Verify result
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+	if result.Cell != "B2:D4" {
+		t.Errorf("expected range B2:D4, got %q", result.Cell)
+	}
+	if !strings.Contains(result.NewValue.(string), "9 cells") {
+		t.Errorf("expected 9 cells written, got: %v", result.NewValue)
+	}
+
+	// Verify the data was written by reading the file
+	f, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for verification: %v", err)
+	}
+	defer f.Close()
+
+	// Check first cell (B2)
+	val, err := f.GetCellValue("Sheet1", "B2")
+	if err != nil {
+		t.Fatalf("failed to read B2: %v", err)
+	}
+	if val != "R1C1" {
+		t.Errorf("expected 'R1C1' at B2, got %q", val)
+	}
+
+	// Check middle cell (C3)
+	val, err = f.GetCellValue("Sheet1", "C3")
+	if err != nil {
+		t.Fatalf("failed to read C3: %v", err)
+	}
+	if val != "200" {
+		t.Errorf("expected '200' at C3, got %q", val)
+	}
+
+	// Check last cell (D4)
+	val, err = f.GetCellValue("Sheet1", "D4")
+	if err != nil {
+		t.Fatalf("failed to read D4: %v", err)
+	}
+	if val != "TRUE" {
+		t.Errorf("expected 'TRUE' at D4, got %q", val)
+	}
+
+	// Test 2: Write single cell range
+	singleData := [][]any{{"Single"}}
+	result2, err := WriteRange(path, "Sheet1", "A1", singleData)
+	if err != nil {
+		t.Fatalf("WriteRange single cell failed: %v", err)
+	}
+	if result2.Cell != "A1:A1" {
+		t.Errorf("expected range A1:A1, got %q", result2.Cell)
+	}
+
+	// Test 3: Write to different sheet
+	data3 := [][]any{
+		{"Sheet2Data1", "Sheet2Data2"},
+	}
+	result3, err := WriteRange(path, "Sheet2", "A1", data3)
+	if err != nil {
+		t.Fatalf("WriteRange to Sheet2 failed: %v", err)
+	}
+	if !result3.Success {
+		t.Error("expected success for Sheet2 write")
+	}
+
+	// Verify Sheet2 data
+	f2, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for Sheet2 verification: %v", err)
+	}
+	defer f2.Close()
+
+	val, err = f2.GetCellValue("Sheet2", "A1")
+	if err != nil {
+		t.Fatalf("failed to read Sheet2 A1: %v", err)
+	}
+	if val != "Sheet2Data1" {
+		t.Errorf("expected 'Sheet2Data1' at Sheet2 A1, got %q", val)
+	}
+}
+
+func TestWriteRangeEmptyRows(t *testing.T) {
+	path := createTestFile(t)
+
+	// Test with empty row in the middle
+	data := [][]any{
+		{"Row1"},
+		{}, // Empty row
+		{"Row3"},
+	}
+
+	result, err := WriteRange(path, "Sheet1", "A1", data)
+	if err != nil {
+		t.Fatalf("WriteRange with empty row failed: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("expected success with empty rows")
+	}
+}
+
+func TestWriteRangeCellLimit(t *testing.T) {
+	path := createTestFile(t)
+
+	// Create data that exceeds MaxWriteRangeCells
+	numRows := MaxWriteRangeCells + 1
+	data := make([][]any, numRows)
+	for i := range data {
+		data[i] = []any{i}
+	}
+
+	_, err := WriteRange(path, "Sheet1", "A1", data)
+	if err == nil {
+		t.Fatal("expected error for exceeding cell limit")
+	}
+	if !errors.Is(err, ErrCellLimitExceeded) {
+		t.Errorf("expected ErrCellLimitExceeded, got: %v", err)
+	}
+}
+
+func TestWriteRangeErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name      string
+		path      string
+		sheet     string
+		startCell string
+		data      [][]any
+	}{
+		{
+			name:      "non-existent file",
+			path:      filepath.Join(dir, "nonexistent.xlsx"),
+			sheet:     "Sheet1",
+			startCell: "A1",
+			data:      [][]any{{"test"}},
+		},
+		{
+			name:      "non-existent sheet",
+			path:      createTestFile(t),
+			sheet:     "NonExistent",
+			startCell: "A1",
+			data:      [][]any{{"test"}},
+		},
+		{
+			name:      "invalid start cell",
+			path:      createTestFile(t),
+			sheet:     "Sheet1",
+			startCell: "INVALID",
+			data:      [][]any{{"test"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := WriteRange(tt.path, tt.sheet, tt.startCell, tt.data)
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+			t.Logf("error: %v", err)
+		})
+	}
+}
+
+func TestCreateSheet(t *testing.T) {
+	// Create test file
+	path := createTestFile(t)
+
+	// Test 1: Create sheet without headers
+	result, err := CreateSheet(path, "NewSheet", nil)
+	if err != nil {
+		t.Fatalf("CreateSheet failed: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+	if result.Sheet != "NewSheet" {
+		t.Errorf("expected sheet 'NewSheet', got %q", result.Sheet)
+	}
+
+	// Verify the sheet was created
+	f, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for verification: %v", err)
+	}
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	if !slices.Contains(sheets, "NewSheet") {
+		t.Errorf("NewSheet not found in sheet list: %v", sheets)
+	}
+
+	// Test 2: Create sheet with headers
+	headers := []string{"ID", "Name", "Email"}
+	result2, err := CreateSheet(path, "WithHeaders", headers)
+	if err != nil {
+		t.Fatalf("CreateSheet with headers failed: %v", err)
+	}
+
+	if !result2.Success {
+		t.Error("expected success=true for sheet with headers")
+	}
+
+	// Verify headers were written
+	f2, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for header verification: %v", err)
+	}
+	defer f2.Close()
+
+	// Check header cells
+	val, err := f2.GetCellValue("WithHeaders", "A1")
+	if err != nil {
+		t.Fatalf("failed to read A1: %v", err)
+	}
+	if val != "ID" {
+		t.Errorf("expected 'ID' at A1, got %q", val)
+	}
+
+	val, err = f2.GetCellValue("WithHeaders", "C1")
+	if err != nil {
+		t.Fatalf("failed to read C1: %v", err)
+	}
+	if val != "Email" {
+		t.Errorf("expected 'Email' at C1, got %q", val)
+	}
+}
+
+func TestCreateSheetDuplicate(t *testing.T) {
+	path := createTestFile(t)
+
+	// Sheet1 already exists
+	_, err := CreateSheet(path, "Sheet1", nil)
+	if err == nil {
+		t.Fatal("expected error when creating duplicate sheet")
+	}
+	if !errors.Is(err, ErrSheetExists) {
+		t.Errorf("expected ErrSheetExists, got: %v", err)
+	}
+}
+
+func TestCreateSheetErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test non-existent file
+	_, err := CreateSheet(filepath.Join(dir, "nonexistent.xlsx"), "Test", nil)
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+	t.Logf("error: %v", err)
+}
+
+func TestDeleteSheet(t *testing.T) {
+	// Create test file with multiple sheets
+	path := createTestFile(t)
+
+	// Add another sheet so we can delete one
+	_, err := CreateSheet(path, "ToDelete", nil)
+	if err != nil {
+		t.Fatalf("failed to create sheet to delete: %v", err)
+	}
+
+	// Test 1: Delete the new sheet
+	result, err := DeleteSheet(path, "ToDelete")
+	if err != nil {
+		t.Fatalf("DeleteSheet failed: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+	if result.Sheet != "ToDelete" {
+		t.Errorf("expected sheet 'ToDelete', got %q", result.Sheet)
+	}
+
+	// Verify the sheet was deleted
+	f, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for verification: %v", err)
+	}
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	for _, sheet := range sheets {
+		if sheet == "ToDelete" {
+			t.Error("ToDelete sheet still exists after deletion")
+		}
+	}
+}
+
+func TestDeleteSheetLastSheet(t *testing.T) {
+	// Create a file with only one sheet
+	dir := t.TempDir()
+	path := filepath.Join(dir, "single_sheet.xlsx")
+
+	f := excelize.NewFile()
+	defer f.Close()
+
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+
+	// Try to delete the only sheet
+	_, err := DeleteSheet(path, "Sheet1")
+	if err == nil {
+		t.Fatal("expected error when deleting last sheet")
+	}
+	if !errors.Is(err, ErrCannotDeleteLastSheet) {
+		t.Errorf("expected ErrCannotDeleteLastSheet, got: %v", err)
+	}
+}
+
+func TestDeleteSheetNonExistent(t *testing.T) {
+	path := createTestFile(t)
+
+	_, err := DeleteSheet(path, "NonExistent")
+	if err == nil {
+		t.Fatal("expected error when deleting non-existent sheet")
+	}
+	if !errors.Is(err, ErrSheetNotFound) {
+		t.Errorf("expected ErrSheetNotFound, got: %v", err)
+	}
+}
+
+func TestDeleteSheetErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test non-existent file
+	_, err := DeleteSheet(filepath.Join(dir, "nonexistent.xlsx"), "Test")
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+	t.Logf("error: %v", err)
+}
+
+func TestRenameSheet(t *testing.T) {
+	// Create test file
+	path := createTestFile(t)
+
+	// Test rename Sheet2 to RenamedSheet
+	result, err := RenameSheet(path, "Sheet2", "RenamedSheet")
+	if err != nil {
+		t.Fatalf("RenameSheet failed: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+	if result.Sheet != "RenamedSheet" {
+		t.Errorf("expected sheet 'RenamedSheet', got %q", result.Sheet)
+	}
+
+	// Verify the sheet was renamed
+	f, err := OpenFile(path)
+	if err != nil {
+		t.Fatalf("failed to open file for verification: %v", err)
+	}
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	foundOld := false
+	foundNew := false
+	for _, sheet := range sheets {
+		if sheet == "Sheet2" {
+			foundOld = true
+		}
+		if sheet == "RenamedSheet" {
+			foundNew = true
+		}
+	}
+
+	if foundOld {
+		t.Error("old sheet name 'Sheet2' still exists")
+	}
+	if !foundNew {
+		t.Error("new sheet name 'RenamedSheet' not found")
+	}
+
+	// Verify data is still accessible under new name
+	val, err := f.GetCellValue("RenamedSheet", "A1")
+	if err != nil {
+		t.Fatalf("failed to read from renamed sheet: %v", err)
+	}
+	if val != "Data" {
+		t.Errorf("expected 'Data', got %q", val)
+	}
+}
+
+func TestRenameSheetOldNotFound(t *testing.T) {
+	path := createTestFile(t)
+
+	_, err := RenameSheet(path, "NonExistent", "NewName")
+	if err == nil {
+		t.Fatal("expected error when renaming non-existent sheet")
+	}
+	if !errors.Is(err, ErrSheetNotFound) {
+		t.Errorf("expected ErrSheetNotFound, got: %v", err)
+	}
+}
+
+func TestRenameSheetNewExists(t *testing.T) {
+	path := createTestFile(t)
+
+	// Try to rename Sheet2 to Sheet1 (which already exists)
+	_, err := RenameSheet(path, "Sheet2", "Sheet1")
+	if err == nil {
+		t.Fatal("expected error when new name already exists")
+	}
+	if !errors.Is(err, ErrSheetExists) {
+		t.Errorf("expected ErrSheetExists, got: %v", err)
+	}
+}
+
+func TestRenameSheetErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test non-existent file
+	_, err := RenameSheet(filepath.Join(dir, "nonexistent.xlsx"), "Old", "New")
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+	t.Logf("error: %v", err)
 }
