@@ -326,6 +326,178 @@ No environment variables or configuration flags were added. All limits are defin
 
 None. Implementation is complete and fully tested.
 
+### Phase 5: CLI Write Commands (COMPLETE)
+
+**5.1 Write Command**
+- [x] Implemented in: `/internal/cli/write.go` (45 lines)
+- [x] CLI command for writing cell values
+- [x] Supports auto type detection and explicit type specification
+- [x] Returns previous value for confirmation
+- [x] Delegates to `xlsx.WriteCell()` function
+
+**5.2 Create Command**
+- [x] Implemented in: `/internal/cli/create.go` (75 lines)
+- [x] CLI command for creating new Excel files
+- [x] Supports custom sheet names and headers
+- [x] Can load initial data from JSON file
+- [x] Prevents accidental overwrites without flag
+- [x] Delegates to `xlsx.CreateFile()` function
+
+**5.3 Append Command**
+- [x] Implemented in: `/internal/cli/append.go` (51 lines)
+- [x] CLI command for appending rows from JSON file
+- [x] Automatically finds last row
+- [x] Returns row range information
+- [x] Delegates to `xlsx.AppendRows()` function
+
+**5.4 Output Helper**
+- [x] Implemented in: `/internal/output/print.go` (18 lines)
+- [x] Unified print function for consistent formatting
+- [x] Supports JSON, CSV, TSV output formats
+- [x] Used by all CLI write commands
+
+## Phase 5: Files Modified
+
+| File | Description | Lines |
+|------|-------------|-------|
+| `/internal/cli/write.go` | CLI command for writing cell values | 45 |
+| `/internal/cli/create.go` | CLI command for creating new files | 75 |
+| `/internal/cli/append.go` | CLI command for appending rows | 51 |
+| `/internal/output/print.go` | Helper function for printing formatted output | 18 |
+
+**Phase 5 Total**: +189 lines
+
+## Phase 5: Usage Examples
+
+### write Command
+```bash
+# Write string value
+xlq write data.xlsx A1 "Hello"
+
+# Write number with explicit type
+xlq write data.xlsx B1 42 --type number
+
+# Write formula
+xlq write data.xlsx C1 "=SUM(A1:B1)" --type formula
+
+# Write to specific sheet
+xlq write report.xlsx A2 "John Doe" --sheet "Users"
+
+# Output as CSV
+xlq write data.xlsx A1 "Test" --format csv
+```
+
+### create Command
+```bash
+# Create simple file
+xlq create report.xlsx
+
+# Create with custom sheet and headers
+xlq create report.xlsx \
+  --sheet "Sales" \
+  --headers "Date,Amount,Customer"
+
+# Create with initial data from JSON file
+echo '[["Alice","30"],["Bob","25"]]' > data.json
+xlq create users.xlsx --data data.json
+
+# Overwrite existing file
+xlq create new.xlsx --overwrite
+```
+
+### append Command
+```bash
+# Append rows from JSON file
+echo '[["Jane Smith","25","jane@example.com"],["Bob Wilson","35","bob@example.com"]]' > rows.json
+xlq append users.xlsx rows.json --sheet "Users"
+
+# Output result as CSV
+xlq append data.xlsx rows.json --format csv
+```
+
+### Complete CLI Workflow Example
+```bash
+# 1. Create new report with headers
+xlq create report.xlsx \
+  --sheet "Q1 Sales" \
+  --headers "Date,Product,Amount,Region"
+
+# 2. Write initial data
+xlq write report.xlsx A2 "2026-01-01"
+xlq write report.xlsx B2 "Widget"
+xlq write report.xlsx C2 "1500.00" --type number
+xlq write report.xlsx D2 "East"
+
+# 3. Append bulk data from JSON
+cat > sales_data.json << 'EOF'
+[
+  ["2026-01-02", "Gadget", 2300, "West"],
+  ["2026-01-03", "Widget", 1800, "North"],
+  ["2026-01-04", "Doohickey", 950, "South"]
+]
+EOF
+
+xlq append report.xlsx sales_data.json --sheet "Q1 Sales"
+
+# 4. Add formula for total
+xlq write report.xlsx C6 "=SUM(C2:C5)" --type formula
+
+# 5. Verify the result
+xlq read report.xlsx "Q1 Sales"
+```
+
+## Phase 5: Integration Testing
+
+Manual end-to-end testing confirms:
+1. ✅ Create file with headers
+2. ✅ Write cell values with auto type detection
+3. ✅ Write cell values with explicit types (number, formula)
+4. ✅ Append rows from JSON file
+5. ✅ All data persisted correctly
+6. ✅ JSON output format works
+7. ✅ Commands integrate with existing read operations
+
+**Test Results**:
+```
+All packages: PASS
+- internal/cli: PASS (0.027s)
+- internal/output: PASS (0.002s)
+- internal/xlsx: PASS (cached)
+- internal/mcp: PASS (0.035s)
+
+Linter: golangci-lint run ./...
+Result: No issues found
+```
+
+## Phase 5: Architecture Decisions
+
+### 1. Reuse Existing xlsx Package Functions
+CLI commands delegate all business logic to the `internal/xlsx` package functions implemented in Phase 4. This ensures:
+- Single source of truth for write operations
+- Consistent behavior between CLI and MCP interfaces
+- Easy maintenance and testing
+
+### 2. JSON File Input for Data
+Both `create` and `append` commands accept JSON files for data input because:
+- Structured data is easier to validate
+- Standard format across many tools
+- Easy to generate programmatically
+- Supports complex data types
+
+### 3. Output Helper Function
+Created centralized `output.Print()` function to:
+- Reduce code duplication across commands
+- Ensure consistent formatting
+- Simplify error handling
+- Make future output changes easier
+
+### 4. Flag Consistency
+All commands follow consistent flag patterns:
+- `-s, --sheet` for sheet selection
+- `-f, --format` for output format
+- `-t, --type` for value types (write command)
+- Short and long forms for usability
+
 ## Next Steps
 
-Implementation is complete and ready for review by the reviewer agent.
+Implementation is complete for all phases (1-5) and ready for review by the reviewer agent.
