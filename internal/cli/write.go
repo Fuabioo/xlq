@@ -14,7 +14,10 @@ var writeCmd = &cobra.Command{
 	Long:  "Write a value to a specific cell in an xlsx file. Use --sheet to specify sheet.",
 	Args:  cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		file := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		file, err := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		if err != nil {
+			return err
+		}
 		cell := args[1]
 		value := args[2]
 

@@ -16,7 +16,10 @@ var readCmd = &cobra.Command{
 	Long:  `Read cells from a range (e.g., A1:C10). If no range specified, reads entire sheet.`,
 	Args:  cobra.RangeArgs(1, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filePath := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		filePath, err := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		if err != nil {
+			return err
+		}
 		f, err := xlsx.OpenFile(filePath)
 		if err != nil {
 			return err

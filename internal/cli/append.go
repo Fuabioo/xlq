@@ -17,8 +17,14 @@ var appendCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		basepath := GetBasepathFromCmd(cmd)
-		file := ResolveFilePath(basepath, args[0])
-		dataFile := ResolveFilePath(basepath, args[1])
+		file, err := ResolveFilePath(basepath, args[0])
+		if err != nil {
+			return err
+		}
+		dataFile, err := ResolveFilePath(basepath, args[1])
+		if err != nil {
+			return err
+		}
 
 		sheet, err := cmd.Flags().GetString("sheet")
 		if err != nil {

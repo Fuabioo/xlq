@@ -2,6 +2,7 @@ package cli
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -9,10 +10,12 @@ import (
 
 func TestResolveFilePath(t *testing.T) {
 	tests := []struct {
-		name     string
-		basepath string
-		file     string
-		expected string
+		name        string
+		basepath    string
+		file        string
+		expected    string
+		shouldError bool
+		errorMsg    string
 	}{
 		{
 			name:     "empty basepath returns file unchanged",
@@ -50,11 +53,51 @@ func TestResolveFilePath(t *testing.T) {
 			file:     "",
 			expected: "",
 		},
+		{
+			name:     "safe relative path with .. staying inside",
+			basepath: "/tmp/base",
+			file:     "sub/../file.xlsx",
+			expected: filepath.Join("/tmp/base", "file.xlsx"),
+		},
+		{
+			name:        "path traversal with ../../",
+			basepath:    "/tmp/base",
+			file:        "../../etc/passwd",
+			shouldError: true,
+			errorMsg:    "path traversal denied",
+		},
+		{
+			name:        "path traversal with multiple ../",
+			basepath:    "/tmp/base",
+			file:        "../../../etc/shadow",
+			shouldError: true,
+			errorMsg:    "path traversal denied",
+		},
+		{
+			name:        "path traversal single ..",
+			basepath:    "/tmp/base",
+			file:        "..",
+			shouldError: true,
+			errorMsg:    "path traversal denied",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ResolveFilePath(tt.basepath, tt.file)
+			result, err := ResolveFilePath(tt.basepath, tt.file)
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("expected error but got result %q", result)
+					return
+				}
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got: %v", tt.errorMsg, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if result != tt.expected {
 				t.Errorf("ResolveFilePath(%q, %q) = %q, want %q",
 					tt.basepath, tt.file, result, tt.expected)

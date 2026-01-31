@@ -340,67 +340,6 @@ func ValidateWritePath(path string, allowOverwrite bool) (string, error) {
 	return "", fmt.Errorf("%w: path outside allowed directories", ErrWriteDenied)
 }
 
-// addToAllowedPaths appends a canonicalized path to allowedBasePaths
-// if it is not already present. Caller must ensure realPath is already
-// validated and canonicalized.
-func addToAllowedPaths(realPath string) {
-	allowedPathsMu.Lock()
-	defer allowedPathsMu.Unlock()
-
-	for _, p := range allowedBasePaths {
-		if p == realPath {
-			return
-		}
-	}
-	allowedBasePaths = append(allowedBasePaths, realPath)
-}
-
-// ResolveFilePathMCP resolves a file path using a basepath for MCP operations.
-// It validates the basepath (must exist, be a directory, not filesystem root),
-// adds it to allowedBasePaths, and returns the joined path.
-// If basepath is empty, file is returned unchanged.
-// If file is already absolute, file is returned unchanged (basepath is still
-// validated and added to allowed paths if non-empty).
-func ResolveFilePathMCP(basepath, file string) (string, error) {
-	if basepath == "" {
-		return file, nil
-	}
-
-	// Canonicalize basepath
-	absBasepath, err := filepath.Abs(basepath)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve basepath %q: %w", basepath, err)
-	}
-
-	realBasepath, err := filepath.EvalSymlinks(absBasepath)
-	if err != nil {
-		return "", fmt.Errorf("basepath %q does not exist or cannot be resolved: %w", basepath, err)
-	}
-
-	// Must be a directory
-	info, err := os.Stat(realBasepath)
-	if err != nil {
-		return "", fmt.Errorf("cannot stat basepath %q: %w", basepath, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("basepath %q is not a directory", basepath)
-	}
-
-	// Reject filesystem root
-	if filepath.Dir(realBasepath) == realBasepath {
-		return "", fmt.Errorf("basepath %q resolves to filesystem root, which is too broad", basepath)
-	}
-
-	// Add to allowed paths for security layer compatibility
-	addToAllowedPaths(realBasepath)
-
-	// Resolve the file path
-	if filepath.IsAbs(file) {
-		return file, nil
-	}
-	return filepath.Join(realBasepath, file), nil
-}
-
 // CheckFileSize validates file size for write operations.
 func CheckFileSize(path string, maxSize int64) error {
 	info, err := os.Stat(path)
