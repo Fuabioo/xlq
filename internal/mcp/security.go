@@ -19,6 +19,47 @@ var (
 // If empty, defaults to current working directory.
 var AllowedBasePaths []string
 
+// InitAllowedPaths sets AllowedBasePaths to the current working directory
+// plus any additional paths provided. This ensures CWD is always included.
+func InitAllowedPaths(extraPaths []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("cannot determine working directory: %w", err)
+	}
+
+	paths := []string{cwd}
+	for _, p := range extraPaths {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+
+	AllowedBasePaths = paths
+	return nil
+}
+
+// LoadAllowedPathsFromEnv reads the XLQ_ALLOWED_PATHS environment variable
+// (colon-separated list of directories) and initializes AllowedBasePaths.
+// If the env var is not set, AllowedBasePaths is left unchanged (defaults to CWD).
+func LoadAllowedPathsFromEnv() error {
+	envPaths := os.Getenv("XLQ_ALLOWED_PATHS")
+	if envPaths == "" {
+		return nil
+	}
+
+	parts := strings.Split(envPaths, string(os.PathListSeparator))
+	var extra []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			extra = append(extra, p)
+		}
+	}
+
+	return InitAllowedPaths(extra)
+}
+
 // ValidateFilePath ensures the path is safe to access.
 func ValidateFilePath(requestedPath string) (string, error) {
 	if requestedPath == "" {
