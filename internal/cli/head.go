@@ -17,7 +17,8 @@ var headCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		n, _ := cmd.Flags().GetInt("number")
 
-		f, err := xlsx.OpenFile(args[0])
+		filePath := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		f, err := xlsx.OpenFile(filePath)
 		if err != nil {
 			return err
 		}

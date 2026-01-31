@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewServer(t *testing.T) {
-	srv := New()
+	srv := New("")
 	if srv == nil {
 		t.Fatal("New() returned nil")
 		return

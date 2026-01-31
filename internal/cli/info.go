@@ -14,7 +14,8 @@ var infoCmd = &cobra.Command{
 	Short: "Get sheet metadata",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, err := xlsx.OpenFile(args[0])
+		filePath := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		f, err := xlsx.OpenFile(filePath)
 		if err != nil {
 			return err
 		}

@@ -14,7 +14,8 @@ var cellCmd = &cobra.Command{
 	Short: "Get single cell value",
 	Args:  cobra.RangeArgs(2, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, err := xlsx.OpenFile(args[0])
+		filePath := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		f, err := xlsx.OpenFile(filePath)
 		if err != nil {
 			return err
 		}

@@ -28,7 +28,7 @@ func TestHandleWriteCell(t *testing.T) {
 	}
 
 	// Create server
-	srv := New()
+	srv := New("")
 
 	// Create a mock request
 	request := mcp.CallToolRequest{
@@ -118,7 +118,7 @@ func TestHandleAppendRows(t *testing.T) {
 	}
 
 	// Create server
-	srv := New()
+	srv := New("")
 
 	// Create a mock request
 	newRows := [][]any{
@@ -188,7 +188,7 @@ func TestHandleCreateFile(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "test_create_file.xlsx")
 
 	// Create server
-	srv := New()
+	srv := New("")
 
 	// Create a mock request
 	headers := []string{"Product", "Price", "Quantity"}
@@ -271,7 +271,7 @@ func TestHandleCreateFile(t *testing.T) {
 }
 
 func TestHandleWriteCellErrors(t *testing.T) {
-	srv := New()
+	srv := New("")
 
 	tests := []struct {
 		name    string
@@ -324,7 +324,7 @@ func TestHandleWriteCellErrors(t *testing.T) {
 }
 
 func TestHandleAppendRowsErrors(t *testing.T) {
-	srv := New()
+	srv := New("")
 
 	// Create a temporary test directory in current working directory
 	tmpDir := filepath.Join("testdata", "tmp_append_errors_test")

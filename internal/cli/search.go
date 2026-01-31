@@ -20,7 +20,8 @@ var searchCmd = &cobra.Command{
 		sheet, _ := cmd.Flags().GetString("sheet")
 		max, _ := cmd.Flags().GetInt("max")
 
-		f, err := xlsx.OpenFile(args[0])
+		filePath := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		f, err := xlsx.OpenFile(filePath)
 		if err != nil {
 			return err
 		}

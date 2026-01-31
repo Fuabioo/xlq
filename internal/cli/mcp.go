@@ -18,6 +18,13 @@ var mcpCmd = &cobra.Command{
 			return fmt.Errorf("failed to get allowed-paths flag: %w", err)
 		}
 
+		basepath := GetBasepathFromCmd(cmd)
+
+		// If basepath is set, include it in allowed paths
+		if basepath != "" {
+			allowedPaths = append(allowedPaths, basepath)
+		}
+
 		if len(allowedPaths) > 0 {
 			// CLI flag takes precedence over env var
 			if err := mcp.InitAllowedPaths(allowedPaths); err != nil {
@@ -38,7 +45,7 @@ var mcpCmd = &cobra.Command{
 
 		log.Printf("xlq MCP server allowed paths: %v", mcp.GetAllowedBasePaths())
 
-		srv := mcp.New()
+		srv := mcp.New(basepath)
 		return srv.Run()
 	},
 }

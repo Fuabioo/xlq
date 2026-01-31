@@ -16,8 +16,9 @@ var appendCmd = &cobra.Command{
 	Long:  "Append rows from a JSON file to the end of a sheet.",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		file := args[0]
-		dataFile := args[1]
+		basepath := GetBasepathFromCmd(cmd)
+		file := ResolveFilePath(basepath, args[0])
+		dataFile := ResolveFilePath(basepath, args[1])
 
 		sheet, err := cmd.Flags().GetString("sheet")
 		if err != nil {

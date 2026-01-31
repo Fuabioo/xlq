@@ -35,7 +35,7 @@ func TestPathTraversalVulnerability(t *testing.T) {
 	t.Logf("Created test file at: %s", tmpFile)
 
 	// Create MCP server
-	srv := New()
+	srv := New("")
 	if srv == nil {
 		t.Fatal("Failed to create MCP server")
 	}
@@ -124,7 +124,7 @@ func TestAllHandlersPathTraversal(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	srv := New()
+	srv := New("")
 	if srv == nil {
 		t.Fatal("Failed to create MCP server")
 	}
@@ -228,7 +228,7 @@ func TestSymbolicLinkPathTraversal(t *testing.T) {
 
 	t.Logf("Created symlink: %s -> %s", symlinkPath, tmpFile)
 
-	srv := New()
+	srv := New("")
 	request := createMockRequest("sheets", map[string]any{
 		"file": symlinkPath,
 	})

@@ -17,7 +17,7 @@ var createCmd = &cobra.Command{
 	Long:  "Create a new xlsx file with optional headers and initial data.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		file := args[0]
+		file := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
 
 		sheetName, err := cmd.Flags().GetString("sheet")
 		if err != nil {
@@ -46,6 +46,7 @@ var createCmd = &cobra.Command{
 
 		var rows [][]any
 		if dataFile != "" {
+			dataFile = ResolveFilePath(GetBasepathFromCmd(cmd), dataFile)
 			// Read JSON data from file
 			data, err := os.ReadFile(dataFile)
 			if err != nil {

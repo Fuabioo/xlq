@@ -40,6 +40,7 @@ func Execute(ctx context.Context, version, commit, date string) error {
 
 func init() {
 	rootCmd.PersistentFlags().StringP("format", "f", "json", "Output format (json, csv, tsv)")
+	rootCmd.PersistentFlags().StringP("basepath", "b", "", "Base directory for relative file paths (env: XLQ_BASEPATH)")
 }
 
 // GetFormatFromCmd returns the format flag value from the command
