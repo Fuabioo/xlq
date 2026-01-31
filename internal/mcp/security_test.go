@@ -371,12 +371,12 @@ func TestValidateWritePath(t *testing.T) {
 		t.Fatalf("Failed to create read-only directory: %v", err)
 	}
 
-	// Save original AllowedBasePaths and restore after test
-	origBasePaths := AllowedBasePaths
-	defer func() { AllowedBasePaths = origBasePaths }()
+	// Save original allowedBasePaths and restore after test
+	origBasePaths := allowedBasePaths
+	defer func() { allowedBasePaths = origBasePaths }()
 
 	// Set allowed base paths to our test directory
-	AllowedBasePaths = []string{tmpDir}
+	allowedBasePaths = []string{tmpDir}
 
 	tests := []struct {
 		name           string
@@ -588,9 +588,9 @@ func TestValidateWritePathSymlinks(t *testing.T) {
 	}
 
 	// Set allowed base paths
-	origBasePaths := AllowedBasePaths
-	defer func() { AllowedBasePaths = origBasePaths }()
-	AllowedBasePaths = []string{allowedDir}
+	origBasePaths := allowedBasePaths
+	defer func() { allowedBasePaths = origBasePaths }()
+	allowedBasePaths = []string{allowedDir}
 
 	// Try to write via symlink - should be blocked because real path is outside allowed
 	_, err = ValidateWritePath(symlinkPath, true)
