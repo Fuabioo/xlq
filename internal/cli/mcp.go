@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/fuabioo/xlq/internal/mcp"
 	"github.com/spf13/cobra"
@@ -22,12 +23,20 @@ var mcpCmd = &cobra.Command{
 			if err := mcp.InitAllowedPaths(allowedPaths); err != nil {
 				return fmt.Errorf("failed to initialize allowed paths: %w", err)
 			}
-		} else {
+		} else if err := mcp.LoadAllowedPathsFromEnv(); err != nil {
 			// Fall back to XLQ_ALLOWED_PATHS environment variable
-			if err := mcp.LoadAllowedPathsFromEnv(); err != nil {
-				return fmt.Errorf("failed to load allowed paths from environment: %w", err)
+			return fmt.Errorf("failed to load allowed paths from environment: %w", err)
+		}
+
+		// Always ensure paths are explicitly initialized
+		// (LoadAllowedPathsFromEnv is a no-op when env var is unset)
+		if len(mcp.GetAllowedBasePaths()) == 0 {
+			if err := mcp.InitAllowedPaths(nil); err != nil {
+				return fmt.Errorf("failed to initialize default allowed paths: %w", err)
 			}
 		}
+
+		log.Printf("xlq MCP server allowed paths: %v", mcp.GetAllowedBasePaths())
 
 		srv := mcp.New()
 		return srv.Run()
@@ -37,5 +46,5 @@ var mcpCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(mcpCmd)
 	mcpCmd.Flags().StringSlice("allowed-paths", nil,
-		"Additional directories to allow file access (comma-separated, e.g. --allowed-paths /tmp,/data)")
+		"Additional directories to allow file access (comma-separated or repeated, e.g. --allowed-paths /tmp,/data)")
 }

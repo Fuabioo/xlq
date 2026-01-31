@@ -15,33 +15,85 @@ var (
 	ErrFileExists   = errors.New("file already exists")
 )
 
-// AllowedBasePaths contains directories from which files can be read.
+// allowedBasePaths contains directories from which files can be accessed.
 // If empty, defaults to current working directory.
-var AllowedBasePaths []string
+// Must only be modified via InitAllowedPaths before the server starts.
+var allowedBasePaths []string
 
-// InitAllowedPaths sets AllowedBasePaths to the current working directory
-// plus any additional paths provided. This ensures CWD is always included.
+// GetAllowedBasePaths returns a copy of the current allowed base paths.
+func GetAllowedBasePaths() []string {
+	out := make([]string, len(allowedBasePaths))
+	copy(out, allowedBasePaths)
+	return out
+}
+
+// InitAllowedPaths sets allowedBasePaths to the current working directory
+// plus any additional paths provided. Each path is canonicalized (resolved to
+// absolute path with symlinks evaluated) and validated to be an existing
+// directory. CWD is always included as the first entry.
+// This function replaces any previously configured paths.
 func InitAllowedPaths(extraPaths []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("cannot determine working directory: %w", err)
 	}
 
-	paths := []string{cwd}
-	for _, p := range extraPaths {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			paths = append(paths, p)
-		}
+	// Canonicalize CWD
+	realCWD, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return fmt.Errorf("cannot resolve working directory: %w", err)
 	}
 
-	AllowedBasePaths = paths
+	seen := map[string]bool{realCWD: true}
+	paths := []string{realCWD}
+
+	for _, p := range extraPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		// Canonicalize: absolute path + resolve symlinks
+		absP, err := filepath.Abs(p)
+		if err != nil {
+			return fmt.Errorf("cannot resolve path %q: %w", p, err)
+		}
+
+		realP, err := filepath.EvalSymlinks(absP)
+		if err != nil {
+			return fmt.Errorf("allowed path %q does not exist or cannot be resolved: %w", p, err)
+		}
+
+		// Must be a directory
+		info, err := os.Stat(realP)
+		if err != nil {
+			return fmt.Errorf("cannot stat allowed path %q: %w", p, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("allowed path %q is not a directory", p)
+		}
+
+		// Reject filesystem root
+		if filepath.Dir(realP) == realP {
+			return fmt.Errorf("allowed path %q resolves to filesystem root, which is too broad", p)
+		}
+
+		// Deduplicate
+		if seen[realP] {
+			continue
+		}
+		seen[realP] = true
+		paths = append(paths, realP)
+	}
+
+	allowedBasePaths = paths
 	return nil
 }
 
 // LoadAllowedPathsFromEnv reads the XLQ_ALLOWED_PATHS environment variable
-// (colon-separated list of directories) and initializes AllowedBasePaths.
-// If the env var is not set, AllowedBasePaths is left unchanged (defaults to CWD).
+// and initializes allowedBasePaths. Paths are separated by os.PathListSeparator
+// (colon on Unix, semicolon on Windows).
+// If the env var is not set or empty, AllowedBasePaths is left unchanged.
 func LoadAllowedPathsFromEnv() error {
 	envPaths := os.Getenv("XLQ_ALLOWED_PATHS")
 	if envPaths == "" {
@@ -55,6 +107,11 @@ func LoadAllowedPathsFromEnv() error {
 		if p != "" {
 			extra = append(extra, p)
 		}
+	}
+
+	// If env var was set but contained only separators/whitespace, treat as unset
+	if len(extra) == 0 {
+		return nil
 	}
 
 	return InitAllowedPaths(extra)
@@ -87,7 +144,7 @@ func ValidateFilePath(requestedPath string) (string, error) {
 		return "", fmt.Errorf("cannot determine working directory: %w", err)
 	}
 
-	basePaths := AllowedBasePaths
+	basePaths := allowedBasePaths
 	if len(basePaths) == 0 {
 		basePaths = []string{cwd}
 	}
@@ -244,7 +301,7 @@ func ValidateWritePath(path string, allowOverwrite bool) (string, error) {
 		return "", fmt.Errorf("cannot determine working directory: %w", err)
 	}
 
-	basePaths := AllowedBasePaths
+	basePaths := allowedBasePaths
 	if len(basePaths) == 0 {
 		basePaths = []string{cwd}
 	}
