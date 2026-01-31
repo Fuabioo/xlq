@@ -9,9 +9,14 @@ import (
 
 func TestValidateFilePath(t *testing.T) {
 	// Save original allowedBasePaths
-	originalPaths := allowedBasePaths
+	allowedPathsMu.RLock()
+	originalPaths := make([]string, len(allowedBasePaths))
+	copy(originalPaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
 	defer func() {
+		allowedPathsMu.Lock()
 		allowedBasePaths = originalPaths
+		allowedPathsMu.Unlock()
 	}()
 
 	// Get current working directory
@@ -109,7 +114,9 @@ func TestValidateFilePath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set allowedBasePaths for this test
+			allowedPathsMu.Lock()
 			allowedBasePaths = tt.basePaths
+			allowedPathsMu.Unlock()
 
 			result, err := ValidateFilePath(tt.path)
 
@@ -135,8 +142,15 @@ func TestValidateFilePath(t *testing.T) {
 }
 
 func TestInitAllowedPaths(t *testing.T) {
-	originalPaths := allowedBasePaths
-	defer func() { allowedBasePaths = originalPaths }()
+	allowedPathsMu.RLock()
+	originalPaths := make([]string, len(allowedBasePaths))
+	copy(originalPaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
+	defer func() {
+		allowedPathsMu.Lock()
+		allowedBasePaths = originalPaths
+		allowedPathsMu.Unlock()
+	}()
 
 	// Resolve CWD canonically (same as InitAllowedPaths does)
 	cwd, err := os.Getwd()
@@ -156,7 +170,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	realDir1, _ := filepath.EvalSymlinks(tmpDir1)
 
 	t.Run("No extra paths", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths(nil)
 		if err != nil {
 			t.Fatalf("InitAllowedPaths returned error: %v", err)
@@ -170,7 +186,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("One extra path", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths([]string{tmpDir1})
 		if err != nil {
 			t.Fatalf("InitAllowedPaths returned error: %v", err)
@@ -187,7 +205,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("Multiple extra paths", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths([]string{tmpDir1, tmpDir2})
 		if err != nil {
 			t.Fatalf("InitAllowedPaths returned error: %v", err)
@@ -198,7 +218,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("Empty strings filtered out", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths([]string{"", tmpDir1, "  ", tmpDir2})
 		if err != nil {
 			t.Fatalf("InitAllowedPaths returned error: %v", err)
@@ -209,7 +231,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("Duplicate paths deduplicated", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths([]string{tmpDir1, tmpDir1, tmpDir1})
 		if err != nil {
 			t.Fatalf("InitAllowedPaths returned error: %v", err)
@@ -220,7 +244,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("Filesystem root rejected", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths([]string{"/"})
 		if err == nil {
 			t.Error("Expected error for filesystem root, got none")
@@ -231,7 +257,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("Non-existent path rejected", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err := InitAllowedPaths([]string{"/nonexistent/path/that/does/not/exist"})
 		if err == nil {
 			t.Error("Expected error for non-existent path, got none")
@@ -247,7 +275,9 @@ func TestInitAllowedPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		err = InitAllowedPaths([]string{tmpFile})
 		if err == nil {
 			t.Error("Expected error for file path, got none")
@@ -258,7 +288,9 @@ func TestInitAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("Paths are canonicalized", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		// Use a relative-ish path with trailing components
 		err := InitAllowedPaths([]string{tmpDir1 + "/"})
 		if err != nil {
@@ -275,8 +307,15 @@ func TestInitAllowedPaths(t *testing.T) {
 }
 
 func TestLoadAllowedPathsFromEnv(t *testing.T) {
-	originalPaths := allowedBasePaths
-	defer func() { allowedBasePaths = originalPaths }()
+	allowedPathsMu.RLock()
+	originalPaths := make([]string, len(allowedBasePaths))
+	copy(originalPaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
+	defer func() {
+		allowedPathsMu.Lock()
+		allowedBasePaths = originalPaths
+		allowedPathsMu.Unlock()
+	}()
 
 	// Resolve CWD canonically
 	cwd, err := os.Getwd()
@@ -293,7 +332,9 @@ func TestLoadAllowedPathsFromEnv(t *testing.T) {
 	tmpDir2 := t.TempDir()
 
 	t.Run("Empty env var leaves paths unchanged", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		t.Setenv("XLQ_ALLOWED_PATHS", "")
 		err := LoadAllowedPathsFromEnv()
 		if err != nil {
@@ -305,7 +346,9 @@ func TestLoadAllowedPathsFromEnv(t *testing.T) {
 	})
 
 	t.Run("Single path", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		t.Setenv("XLQ_ALLOWED_PATHS", tmpDir1)
 		err := LoadAllowedPathsFromEnv()
 		if err != nil {
@@ -320,7 +363,9 @@ func TestLoadAllowedPathsFromEnv(t *testing.T) {
 	})
 
 	t.Run("Multiple paths separated", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		t.Setenv("XLQ_ALLOWED_PATHS", tmpDir1+string(os.PathListSeparator)+tmpDir2)
 		err := LoadAllowedPathsFromEnv()
 		if err != nil {
@@ -332,7 +377,9 @@ func TestLoadAllowedPathsFromEnv(t *testing.T) {
 	})
 
 	t.Run("Trailing separator ignored", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		t.Setenv("XLQ_ALLOWED_PATHS", tmpDir1+string(os.PathListSeparator))
 		err := LoadAllowedPathsFromEnv()
 		if err != nil {
@@ -344,7 +391,9 @@ func TestLoadAllowedPathsFromEnv(t *testing.T) {
 	})
 
 	t.Run("Only separators treated as unset", func(t *testing.T) {
+		allowedPathsMu.Lock()
 		allowedBasePaths = nil
+		allowedPathsMu.Unlock()
 		t.Setenv("XLQ_ALLOWED_PATHS", ":::")
 		err := LoadAllowedPathsFromEnv()
 		if err != nil {
@@ -357,8 +406,15 @@ func TestLoadAllowedPathsFromEnv(t *testing.T) {
 }
 
 func TestGetAllowedBasePaths(t *testing.T) {
-	originalPaths := allowedBasePaths
-	defer func() { allowedBasePaths = originalPaths }()
+	allowedPathsMu.RLock()
+	originalPaths := make([]string, len(allowedBasePaths))
+	copy(originalPaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
+	defer func() {
+		allowedPathsMu.Lock()
+		allowedBasePaths = originalPaths
+		allowedPathsMu.Unlock()
+	}()
 
 	tmpDir := t.TempDir()
 	err := InitAllowedPaths([]string{tmpDir})
@@ -379,8 +435,15 @@ func TestGetAllowedBasePaths(t *testing.T) {
 }
 
 func TestInitAllowedPathsWithValidation(t *testing.T) {
-	originalPaths := allowedBasePaths
-	defer func() { allowedBasePaths = originalPaths }()
+	allowedPathsMu.RLock()
+	originalPaths := make([]string, len(allowedBasePaths))
+	copy(originalPaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
+	defer func() {
+		allowedPathsMu.Lock()
+		allowedBasePaths = originalPaths
+		allowedPathsMu.Unlock()
+	}()
 
 	// Create a temp dir and file
 	tmpDir := t.TempDir()
@@ -391,7 +454,9 @@ func TestInitAllowedPathsWithValidation(t *testing.T) {
 	}
 
 	// Without extra paths, temp file should be denied
+	allowedPathsMu.Lock()
 	allowedBasePaths = nil
+	allowedPathsMu.Unlock()
 	_, err = ValidateFilePath(tmpFile)
 	if err == nil {
 		t.Error("Expected access denied for temp file with default paths")
@@ -426,9 +491,14 @@ func TestInitAllowedPathsWithValidation(t *testing.T) {
 
 func TestValidateFilePathSymlinks(t *testing.T) {
 	// Save original allowedBasePaths
-	originalPaths := allowedBasePaths
+	allowedPathsMu.RLock()
+	originalPaths := make([]string, len(allowedBasePaths))
+	copy(originalPaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
 	defer func() {
+		allowedPathsMu.Lock()
 		allowedBasePaths = originalPaths
+		allowedPathsMu.Unlock()
 	}()
 
 	// Get current working directory
@@ -488,7 +558,9 @@ func TestValidateFilePathSymlinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			allowedPathsMu.Lock()
 			allowedBasePaths = tt.basePaths
+			allowedPathsMu.Unlock()
 
 			result, err := ValidateFilePath(tt.path)
 

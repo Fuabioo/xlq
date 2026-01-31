@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Error types for security validation
@@ -17,11 +18,16 @@ var (
 
 // allowedBasePaths contains directories from which files can be accessed.
 // If empty, defaults to current working directory.
-// Must only be modified via InitAllowedPaths before the server starts.
+// Protected by allowedPathsMu for thread-safe access.
 var allowedBasePaths []string
+
+// allowedPathsMu protects concurrent access to allowedBasePaths.
+var allowedPathsMu sync.RWMutex
 
 // GetAllowedBasePaths returns a copy of the current allowed base paths.
 func GetAllowedBasePaths() []string {
+	allowedPathsMu.RLock()
+	defer allowedPathsMu.RUnlock()
 	out := make([]string, len(allowedBasePaths))
 	copy(out, allowedBasePaths)
 	return out
@@ -86,7 +92,9 @@ func InitAllowedPaths(extraPaths []string) error {
 		paths = append(paths, realP)
 	}
 
+	allowedPathsMu.Lock()
 	allowedBasePaths = paths
+	allowedPathsMu.Unlock()
 	return nil
 }
 
@@ -144,7 +152,11 @@ func ValidateFilePath(requestedPath string) (string, error) {
 		return "", fmt.Errorf("cannot determine working directory: %w", err)
 	}
 
-	basePaths := allowedBasePaths
+	allowedPathsMu.RLock()
+	basePaths := make([]string, len(allowedBasePaths))
+	copy(basePaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
+
 	if len(basePaths) == 0 {
 		basePaths = []string{cwd}
 	}
@@ -301,7 +313,11 @@ func ValidateWritePath(path string, allowOverwrite bool) (string, error) {
 		return "", fmt.Errorf("cannot determine working directory: %w", err)
 	}
 
-	basePaths := allowedBasePaths
+	allowedPathsMu.RLock()
+	basePaths := make([]string, len(allowedBasePaths))
+	copy(basePaths, allowedBasePaths)
+	allowedPathsMu.RUnlock()
+
 	if len(basePaths) == 0 {
 		basePaths = []string{cwd}
 	}

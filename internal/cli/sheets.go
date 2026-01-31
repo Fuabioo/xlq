@@ -14,7 +14,11 @@ var sheetsCmd = &cobra.Command{
 	Short: "List all sheets in workbook",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, err := xlsx.OpenFile(args[0])
+		filePath, err := ResolveFilePath(GetBasepathFromCmd(cmd), args[0])
+		if err != nil {
+			return err
+		}
+		f, err := xlsx.OpenFile(filePath)
 		if err != nil {
 			return err
 		}

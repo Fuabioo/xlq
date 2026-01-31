@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/fuabioo/xlq/internal/xlsx"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -13,17 +16,19 @@ import (
 // Server wraps the MCP server
 type Server struct {
 	mcpServer *server.MCPServer
+	basepath  string
 }
 
-// New creates a new MCP server with all tools registered
-func New() *Server {
+// New creates a new MCP server with all tools registered.
+// basepath sets the default base directory for resolving relative file paths.
+func New(basepath string) *Server {
 	s := server.NewMCPServer(
 		"xlq",
 		"1.0.0",
 		server.WithToolCapabilities(true),
 	)
 
-	srv := &Server{mcpServer: s}
+	srv := &Server{mcpServer: s, basepath: basepath}
 	srv.registerTools()
 
 	return srv
@@ -169,10 +174,32 @@ func (s *Server) registerTools() {
 	), s.handleDeleteRows)
 }
 
+// resolveFile resolves a file path using the server-level basepath.
+// If basepath is set and file is relative, joins them and checks for path traversal.
+func (s *Server) resolveFile(file string) (string, error) {
+	if s.basepath == "" || filepath.IsAbs(file) {
+		return file, nil
+	}
+	resolved := filepath.Join(s.basepath, file)
+	cleanBase := filepath.Clean(s.basepath)
+	cleanResolved := filepath.Clean(resolved)
+	rel, err := filepath.Rel(cleanBase, cleanResolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to check path containment: %w", err)
+	}
+	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return "", fmt.Errorf("path traversal denied: %q escapes basepath %q", file, s.basepath)
+	}
+	return resolved, nil
+}
+
 // Tool handlers
 
 func (s *Server) handleSheets(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	// Validate path
 	validPath, err := ValidateFilePath(file)
@@ -195,7 +222,10 @@ func (s *Server) handleSheets(ctx context.Context, request mcp.CallToolRequest) 
 }
 
 func (s *Server) handleInfo(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 
 	// Validate path
@@ -225,7 +255,10 @@ func (s *Server) handleInfo(ctx context.Context, request mcp.CallToolRequest) (*
 }
 
 func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	rangeStr := request.GetString("range", "")
 
@@ -284,7 +317,10 @@ func (s *Server) handleRead(ctx context.Context, request mcp.CallToolRequest) (*
 }
 
 func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	n := request.GetInt("n", DefaultHeadRows)
 
@@ -331,7 +367,10 @@ func (s *Server) handleHead(ctx context.Context, request mcp.CallToolRequest) (*
 }
 
 func (s *Server) handleTail(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	n := request.GetInt("n", DefaultTailRows)
 
@@ -373,7 +412,10 @@ func (s *Server) handleTail(ctx context.Context, request mcp.CallToolRequest) (*
 }
 
 func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	pattern := request.GetString("pattern", "")
 	sheet := request.GetString("sheet", "")
 	ignoreCase := request.GetBool("ignoreCase", false)
@@ -438,7 +480,10 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 }
 
 func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	address := request.GetString("address", "")
 	sheet := request.GetString("sheet", "")
 
@@ -469,7 +514,10 @@ func (s *Server) handleCell(ctx context.Context, request mcp.CallToolRequest) (*
 }
 
 func (s *Server) handleWriteCell(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	cell := request.GetString("cell", "")
 	value := request.GetString("value", "")
@@ -496,7 +544,10 @@ func (s *Server) handleWriteCell(ctx context.Context, request mcp.CallToolReques
 }
 
 func (s *Server) handleAppendRows(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 
 	// Parse rows from request arguments using BindArguments
@@ -536,7 +587,10 @@ func (s *Server) handleAppendRows(ctx context.Context, request mcp.CallToolReque
 }
 
 func (s *Server) handleCreateFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheetName := request.GetString("sheet_name", "Sheet1")
 	overwrite := request.GetBool("overwrite", false)
 
@@ -572,7 +626,10 @@ func (s *Server) handleCreateFile(ctx context.Context, request mcp.CallToolReque
 }
 
 func (s *Server) handleWriteRange(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	startCell := request.GetString("start_cell", "")
 
@@ -622,7 +679,10 @@ func (s *Server) handleWriteRange(ctx context.Context, request mcp.CallToolReque
 }
 
 func (s *Server) handleCreateSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	name := request.GetString("name", "")
 
 	// Parse headers from request arguments
@@ -654,7 +714,10 @@ func (s *Server) handleCreateSheet(ctx context.Context, request mcp.CallToolRequ
 }
 
 func (s *Server) handleDeleteSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 
 	// 1. Validate write path
@@ -678,7 +741,10 @@ func (s *Server) handleDeleteSheet(ctx context.Context, request mcp.CallToolRequ
 }
 
 func (s *Server) handleRenameSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	oldName := request.GetString("old_name", "")
 	newName := request.GetString("new_name", "")
 
@@ -742,7 +808,10 @@ func jsonResultWithMetadata(data any, rowsReturned int, truncated bool, limit in
 }
 
 func (s *Server) handleInsertRows(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	row := request.GetInt("row", 0)
 
@@ -788,7 +857,10 @@ func (s *Server) handleInsertRows(ctx context.Context, request mcp.CallToolReque
 }
 
 func (s *Server) handleDeleteRows(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	file := request.GetString("file", "")
+	file, err := s.resolveFile(request.GetString("file", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sheet := request.GetString("sheet", "")
 	startRow := request.GetInt("start_row", 0)
 	count := request.GetInt("count", 0)
